@@ -1,0 +1,3 @@
+GLOBAL: scripts/tomorrowind/global.lua
+PLAYER: scripts/tomorrowind/player.lua
+CUSTOM: scripts/tomorrowind/worker.lua
