@@ -98,16 +98,23 @@ return {
                 core.sendGlobalEvent('TMW_Found', { yaw = camera.getYaw() })
             end)
             once('setup', 6, function()
-                core.sendGlobalEvent('TMW_Debug', { cmd = 'give', amounts = { ore = 10 } })
+                core.sendGlobalEvent('TMW_Debug', { cmd = 'give', amounts = { ore = 10, wood = -30 } }) -- no timber: laborers must chop it
                 core.sendGlobalEvent('TMW_Debug', { cmd = 'build', kind = 'mine', pos = offset(900, 0), built = true })
                 core.sendGlobalEvent('TMW_Debug', { cmd = 'build', kind = 'smelter', pos = offset(-700, 300), built = true })
                 core.sendGlobalEvent('TMW_Debug', { cmd = 'build', kind = 'lumber', pos = offset(0, -900), built = true })
                 -- a farm blueprint that laborers must build first
                 core.sendGlobalEvent('TMW_Debug', { cmd = 'build', kind = 'farm', pos = offset(-600, -700), built = false })
             end)
-            once('camera_mine', 14, function()
-                core.sendGlobalEvent('TMW_Debug', { cmd = 'tp', pos = offset(640, -260), lookAt = offset(900, 0) })
-                camera.setPitch(0.25)
+            once('camera_farm_site', 14, function()
+                core.sendGlobalEvent('TMW_Debug', { cmd = 'tp', pos = offset(-350, -1250), lookAt = offset(-600, -700) })
+            end)
+            once('aim_farm_site', 15, function()
+                -- aim the camera itself (teleport rotation doesn't turn the 0.52 camera)
+                local target = offset(-600, -700)
+                local cam = camera.getPosition()
+                local d = target - cam
+                camera.setYaw(math.atan2(d.x, d.y))
+                camera.setPitch(math.atan2(cam.z - target.z, util.vector2(d.x, d.y):length()))
             end)
             once('camera_farm', 75, function()
                 core.sendGlobalEvent('TMW_Debug', { cmd = 'tp', pos = offset(-250, -1100), lookAt = offset(-600, -700) })
@@ -119,7 +126,7 @@ return {
                 -- ws[3] stays a laborer and should haul + build the farm
             end)
             -- defense: guard post + stockade, one guard, then a bandit attacks
-            once('debug_on', 64, function() core.sendGlobalEvent('TMW_Debug', { cmd = 'debug', on = true }) end)
+            once('debug_on', 5, function() core.sendGlobalEvent('TMW_Debug', { cmd = 'debug', on = true }) end)
             once('defense_build', 66, function()
                 core.sendGlobalEvent('TMW_Debug', { cmd = 'build', kind = 'guardpost', pos = offset(350, 450), built = true })
                 core.sendGlobalEvent('TMW_Debug', { cmd = 'build', kind = 'stockade', pos = offset(-900, 1100), built = true })

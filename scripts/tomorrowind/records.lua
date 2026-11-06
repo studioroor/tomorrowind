@@ -40,6 +40,30 @@ local function activatorRecord(name, model)
     return world.createRecord(types.Activator.createRecordDraft({ name = name, model = model })).id
 end
 
+-- A uniform piece: copy of a vanilla clothing/armour item, renamed and
+-- made valuable enough that NPC auto-equip always prefers it.
+local function uniformRecord(piece)
+    for _, T in ipairs({ types.Clothing, types.Armor }) do
+        local base = T.records[piece.template]
+        if base then
+            return world.createRecord(T.createRecordDraft({
+                template = base, name = piece.name, value = defs.uniform.value,
+            })).id
+        end
+    end
+    error('missing vanilla item ' .. piece.template)
+end
+
+-- Every uniform piece in defs, keyed by its template id.
+local function uniformPieces()
+    local list = {}
+    for _, piece in pairs(defs.uniform.base) do list[#list + 1] = piece end
+    for _, job in pairs(defs.uniform.jobs) do
+        for _, piece in pairs(job) do list[#list + 1] = piece end
+    end
+    return list
+end
+
 local function staticRecord(model)
     return world.createRecord(types.Static.createRecordDraft({ model = model })).id
 end
@@ -50,6 +74,7 @@ function R.ensure(ids)
     ids.tools = ids.tools or {}
     ids.buildings = ids.buildings or {}
     ids.decor = ids.decor or {}
+    ids.uniform = ids.uniform or {}
     for key, spec in pairs(TOOLS) do
         if not ids.tools[key] then ids.tools[key] = weaponRecord(spec) end
     end
@@ -58,6 +83,9 @@ function R.ensure(ids)
     end
     if not ids.construction then
         ids.construction = activatorRecord('Construction Site', defs.constructionModel)
+    end
+    for _, piece in ipairs(uniformPieces()) do
+        if not ids.uniform[piece.template] then ids.uniform[piece.template] = uniformRecord(piece) end
     end
     for key, model in pairs(defs.decorModels) do
         if not ids.decor[key] then ids.decor[key] = staticRecord(model) end

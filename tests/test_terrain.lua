@@ -53,7 +53,7 @@ test('foundation adds timber and leveling work to a site', function()
         local st = C.currentStep(c, w)
         while st do st = C.completeStep(c, w) end
     end
-    eq(C.siteStatus(c, farm.id), 'Leveling the ground (0%)')
+    eq(C.siteStatus(c, farm.id), 'Timber 10/10 - leveling the ground 0%')
     local t = C.nextTask(c, w)
     assert(t.steps[2].label:find('Leveling'), t.steps[2].label)
     -- refund includes the foundation timber

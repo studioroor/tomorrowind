@@ -51,6 +51,17 @@ name and face.
   hungry they work at half speed, and if they're starving they stop working.
 - When beds are free and there is food to spare, newcomers arrive about once
   per game hour.
+- **Gathering on demand.** If a construction site needs something the
+  storehouse doesn't have, idle laborers and builders go and make it at the
+  right building and carry it straight to the site. That works up the chain
+  too: if ingots are short and so is ore, they mine ore first. If the colony
+  has no building that makes it, the site says so ("needs a Woodcutter's Camp").
+- **Construction progress** (materials delivered, leveling and build %)
+  shows in the ledger and as a floating label above nearby sites.
+- Settlers visibly **carry** what they're hauling (planks, ore, scrap metal,
+  wheat), and wear a **uniform**: the Hlaalu colony shirt for everyone, plus
+  a hard hat for miners, a fur cap for woodcutters, a coif for smelters, a
+  smock for farmers, a cap for builders and chitin for guards.
 - Work continues while you're away or resting. Off-screen settlers are
   simulated at the same rates.
 

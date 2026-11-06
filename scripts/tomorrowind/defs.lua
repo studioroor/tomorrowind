@@ -105,9 +105,40 @@ defs.defense = {
     knockoutBelow = 0.4,      -- with a stockade, enemies below this health fraction get knocked out
     colonyRadius = 3000,      -- attacks within this range of the storehouse raise the alarm
 }
-defs.guardGear = { 'iron longsword', 'chitin cuirass', 'chitin helm' }
+defs.guardGear = { 'iron longsword' }
 -- jobs prisoners can be put to (forced labour)
 defs.prisonerJobs = { Miner = true, Woodcutter = true }
+
+-- What settlers visibly hold while carrying a resource (attached to the hand)
+defs.carryModels = {
+    wood = 'meshes/m/misc_scrapwood02.nif',
+    ore = 'meshes/n/ingred_rawebony_01.nif',
+    ingot = 'meshes/n/ingred_scrap_metal_01.nif',
+    food = 'meshes/m/misc_wheatbundle00.nif',
+}
+defs.carryBone = 'Bip01 L Hand'
+
+-- Uniforms: every settler wears the Hlaalu colony shirt; jobs add gear.
+-- Each piece is a runtime copy of a vanilla item with a high value, because
+-- OpenMW NPCs auto-equip the most valuable clothing whenever their
+-- inventory changes. Slots in `managed` are cleared for jobs that don't
+-- use them.
+defs.uniform = {
+    value = 600,
+    base = { Shirt = { template = 'common_shirt_02_h', name = 'Hlaalu Colony Shirt' } },
+    managed = { 'Helmet', 'Robe', 'Cuirass' },
+    jobs = {
+        Miner = { Helmet = { template = 'netch_leather_boiled_helm', name = "Miner's Hard Hat" } },
+        Woodcutter = { Helmet = { template = 'fur_helm', name = "Woodcutter's Fur Cap" } },
+        Smelter = { Helmet = { template = 'imperial_chain_coif_helm', name = "Smelter's Coif" } },
+        Farmer = { Robe = { template = 'common_robe_02_h', name = "Farmer's Smock" } },
+        Builder = { Helmet = { template = 'netch_leather_helm', name = "Builder's Cap" } },
+        Guard = {
+            Helmet = { template = 'chitin helm', name = 'Colony Guard Helm' },
+            Cuirass = { template = 'chitin cuirass', name = 'Colony Guard Cuirass' },
+        },
+    },
+}
 
 defs.builderTool = 'hammer'
 defs.constructionModel = 'meshes/x/ex_de_scaffold_01.nif'

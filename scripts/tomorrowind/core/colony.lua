@@ -553,8 +553,113 @@ local function buildTask(c, speed)
     end
 end
 
+-- The first built site that produces `res` (nil if the colony has none).
+local function producerOf(c, res)
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built and def(s).output and def(s).output[res] then return s end
+    end
+end
+C.producerOf = producerOf
+
+-- Name of the kind of building that produces `res` ("Woodcutter's Camp").
+local function producerName(res)
+    for _, kind in ipairs(defs.buildOrder) do
+        local d = defs.buildings[kind]
+        if d.output and d.output[res] then return d.name end
+    end
+end
+
+-- Gather at producer `p`. With `site`, carry the result straight to that
+-- construction site; otherwise to the storehouse.
+local function helperGather(c, p, speed, site, need)
+    local d = def(p)
+    local res, amount = next(d.output)
+    local task = {
+        kind = 'gather', site = p.id, helper = true,
+        steps = {
+            step('goto', { to = p.id, label = 'Walking to the ' .. d.name }),
+            step('work', {
+                at = p.id, duration = d.cycle / speed, tool = d.tool,
+                effect = 'produce', res = res, amount = amount,
+                label = 'Helping out: ' .. d.job .. ' at the ' .. d.name,
+            }),
+        },
+    }
+    if site then
+        local n = math.min(amount, need)
+        site.incoming[res] = (site.incoming[res] or 0) + n
+        task.incoming = { site = site.id, res = res, amount = n }
+        task.label = 'Fetching ' .. resName(res) .. ' for the ' .. def(site).name
+        task.steps[#task.steps + 1] = step('goto', { to = site.id, label = 'Carrying ' .. resName(res) .. ' to the ' .. def(site).name .. ' site' })
+        task.steps[#task.steps + 1] = step('supply', { at = site.id, label = 'Unloading at the ' .. def(site).name .. ' site' })
+    else
+        task.label = 'Making ' .. resName(res)
+        task.steps[#task.steps + 1] = step('goto', { to = storeId(c), label = 'Carrying ' .. resName(res) .. ' to the storehouse' })
+        task.steps[#task.steps + 1] = step('store', { label = 'Storing ' .. resName(res) })
+    end
+    return task
+end
+
+-- Process at `p` (e.g. smelt) and carry the output straight to `site`.
+local function helperProcess(c, p, speed, site, need)
+    local d = def(p)
+    local inRes, inAmount = next(d.input)
+    local outRes, outAmount = next(d.output)
+    reserve(c, inRes, inAmount)
+    local n = math.min(outAmount, need)
+    site.incoming[outRes] = (site.incoming[outRes] or 0) + n
+    local name = def(site).name
+    return {
+        kind = 'process', site = p.id, helper = true,
+        label = 'Making ' .. resName(outRes) .. ' for the ' .. name,
+        holds = { res = inRes, amount = inAmount },
+        incoming = { site = site.id, res = outRes, amount = n },
+        steps = {
+            step('goto', { to = storeId(c), label = 'Fetching ' .. resName(inRes) }),
+            step('take', { res = inRes, amount = inAmount, label = 'Taking ' .. resName(inRes) }),
+            step('goto', { to = p.id, label = 'Carrying ' .. resName(inRes) .. ' to the ' .. d.name }),
+            step('work', {
+                at = p.id, duration = d.cycle / speed, tool = d.tool,
+                effect = 'convert', res = outRes, amount = outAmount,
+                label = 'Helping out: ' .. d.job .. ' at the ' .. d.name,
+            }),
+            step('goto', { to = site.id, label = 'Carrying ' .. resName(outRes) .. ' to the ' .. name .. ' site' }),
+            step('supply', { at = site.id, label = 'Unloading at the ' .. name .. ' site' }),
+        },
+    }
+end
+
+-- A construction site is short of something the storehouse doesn't have:
+-- go and make it. Works one step up the chain (no ore for ingots: mine).
+local function supplyRunTask(c, speed)
+    for _, sid in ipairs(c.siteOrder) do
+        local site = c.sites[sid]
+        if not site.built then
+            for _, res in ipairs(defs.resourceOrder) do
+                local left = (site.needs[res] or 0) - (site.incoming[res] or 0)
+                if left > 0 and C.available(c, res) <= 0 then
+                    local p = producerOf(c, res)
+                    if p and not def(p).input then
+                        return helperGather(c, p, speed, site, left)
+                    elseif p then
+                        local inRes, inAmount = next(def(p).input)
+                        if C.available(c, inRes) >= inAmount then
+                            return helperProcess(c, p, speed, site, left)
+                        end
+                        local q = producerOf(c, inRes)
+                        if q and not def(q).input then
+                            return helperGather(c, q, speed, nil)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function constructionWork(c, speed)
-    return buildTask(c, speed) or haulTask(c)
+    return buildTask(c, speed) or haulTask(c) or supplyRunTask(c, speed)
 end
 
 -- Plan the next task for a free worker and remember it on the worker.
@@ -624,8 +729,15 @@ local function applyStep(c, w, st)
         local s = c.sites[st.at]
         local carry = w.carry
         if s and carry then
-            s.needs[carry.res] = math.max(0, (s.needs[carry.res] or 0) - carry.amount)
-            s.incoming[carry.res] = math.max(0, (s.incoming[carry.res] or 0) - carry.amount)
+            local need = s.needs[carry.res] or 0
+            local used = math.min(need, carry.amount)
+            s.needs[carry.res] = need - used
+            local expected = task.incoming and task.incoming.amount or carry.amount
+            s.incoming[carry.res] = math.max(0, (s.incoming[carry.res] or 0) - expected)
+            -- anything left over goes to the stockpile
+            if carry.amount > used then
+                c.stock[carry.res] = (c.stock[carry.res] or 0) + carry.amount - used
+            end
             w.carry = nil
             task.incoming = nil
         end
@@ -763,6 +875,24 @@ function C.simulateWorker(c, wid, dt)
                 addBuildProgress(c, site, dt * speed * defs.buildWorkPerTrip / trip)
                 return
             end
+            -- nothing in stock: make what's missing at a producer
+            for _, res in ipairs(defs.resourceOrder) do
+                local left = (site.needs[res] or 0) - (site.incoming[res] or 0)
+                local p = left > 0 and producerOf(c, res)
+                if p and not def(p).input then
+                    local d = def(p)
+                    local cycle = d.cycle + C.tripSeconds(c, p.id) + C.tripSeconds(c, sid)
+                    w.abstractProgress = w.abstractProgress + dt * speed / cycle
+                    while w.abstractProgress >= 1 and (site.needs[res] or 0) > 0 do
+                        w.abstractProgress = w.abstractProgress - 1
+                        local made = d.output[res]
+                        local used = math.min(made, site.needs[res])
+                        site.needs[res] = site.needs[res] - used
+                        c.stock[res] = c.stock[res] + made - used
+                    end
+                    return
+                end
+            end
         end
     end
 end
@@ -779,21 +909,62 @@ function C.workerStatus(c, wid)
     return 'Idle'
 end
 
+-- Construction progress: delivered materials and work done.
+-- returns { materials = { {res=, name=, have=, need=} }, complete=, phase=, percent= }
+function C.siteProgress(c, sid)
+    local s = c.sites[sid]
+    if not s then return nil end
+    local p = { materials = {}, complete = true }
+    for _, res in ipairs(defs.resourceOrder) do
+        local total = (s.cost or def(s).cost)[res]
+        if total and total > 0 then
+            local left = s.built and 0 or (s.needs[res] or 0)
+            p.materials[#p.materials + 1] = { res = res, name = resName(res), have = total - left, need = total }
+            if left > 0 then p.complete = false end
+        end
+    end
+    local work, level = siteWork(s), s.levelWork or 0
+    if s.built then
+        p.phase, p.percent = 'built', 100
+    elseif not p.complete then
+        p.phase, p.percent = 'materials', 0
+    elseif s.progress < level then
+        p.phase, p.percent = 'leveling', math.floor(100 * s.progress / level)
+    else
+        p.phase = 'building'
+        p.percent = math.floor(100 * (s.progress - level) / math.max(1, work - level))
+    end
+    return p
+end
+
 function C.siteStatus(c, sid)
     local s = c.sites[sid]
     if not s then return '' end
     local d = def(s)
     if not s.built then
+        local p = C.siteProgress(c, sid)
         local parts = {}
-        for _, res in ipairs(defs.resourceOrder) do
-            local n = s.needs[res]
-            if n and n > 0 then parts[#parts + 1] = n .. ' ' .. resName(res) end
+        for _, m in ipairs(p.materials) do
+            parts[#parts + 1] = string.format('%s %d/%d', m.name, m.have, m.need)
         end
-        if #parts > 0 then return 'Needs ' .. table.concat(parts, ', ') end
-        if s.progress < (s.levelWork or 0) then
-            return string.format('Leveling the ground (%d%%)', math.floor(100 * s.progress / s.levelWork))
+        local tail
+        if p.phase == 'materials' then
+            tail = 'waiting for materials'
+            -- say why, if nobody can make what's missing
+            for _, m in ipairs(p.materials) do
+                if m.have < m.need and C.available(c, m.res) <= 0 and not producerOf(c, m.res) then
+                    local maker = producerName(m.res)
+                    tail = 'needs a ' .. (maker or 'source of ' .. m.name)
+                    break
+                end
+            end
+        elseif p.phase == 'leveling' then
+            tail = string.format('leveling the ground %d%%', p.percent)
+        else
+            tail = string.format('%d%% built', p.percent)
         end
-        return string.format('Under construction (%d%%)', math.floor(100 * s.progress / math.max(1, siteWork(s))))
+        if #parts == 0 then return tail end
+        return table.concat(parts, ', ') .. ' - ' .. tail
     end
     if d.job then
         local n = #C.assignedTo(c, sid)

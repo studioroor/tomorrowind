@@ -437,6 +437,74 @@ local function updatePlacing(dt)
 end
 
 ---------------------------------------------------------------------------
+-- floating progress labels above nearby construction sites
+
+local LABEL_RANGE = 2500
+local labels, labelT = nil, 0
+local debugOn = defs.debug
+local labelLogT = 0
+
+local function clearLabels()
+    if labels then labels:destroy() labels = nil end
+end
+
+local function progressLines(site)
+    local p = site.progress
+    local lines = { text(site.name, nil, true) }
+    if p then
+        local mats = {}
+        for _, m in ipairs(p.materials) do mats[#mats + 1] = string.format('%s %d/%d', m.name, m.have, m.need) end
+        if #mats > 0 then lines[#lines + 1] = text(table.concat(mats, '   ')) end
+        local phase = p.phase == 'materials' and 'Waiting for materials'
+            or p.phase == 'leveling' and string.format('Leveling the ground: %d%%', p.percent)
+            or string.format('Construction: %d%%', p.percent)
+        lines[#lines + 1] = text(phase)
+    end
+    return lines
+end
+
+local function updateLabels(dt)
+    labelT = labelT - dt
+    if labelT > 0 then return end
+    labelT = 0.1
+    if not snap.founded or ledger or placing or I.UI.getMode() then return clearLabels() end
+    local screen = ui.screenSize()
+    local cam = camera.getPosition()
+    local items = {}
+    for _, site in ipairs(snap.sites or {}) do
+        if not site.built and (site.pos - cam):length() < LABEL_RANGE then
+            local v = camera.worldToViewportVector(site.pos + util.vector3(0, 0, 250))
+            labelLogT = labelLogT - 0.1
+            if debugOn and labelLogT <= 0 then
+                labelLogT = 2
+                print(string.format('[Tomorrowind] label %s: dist=%.0f viewport=%s screen=%s', site.name,
+                    (site.pos - cam):length(), tostring(v), tostring(screen)))
+            end
+            local x, y = v.x, v.y
+            if math.abs(x) <= 1.5 and math.abs(y) <= 1.5 then x, y = x * screen.x, y * screen.y end
+            if v.z > 0 and x > 0 and x < screen.x and y > 0 and y < screen.y then
+                -- keep the label readable near the screen edges
+                x = math.max(160, math.min(screen.x - 160, x))
+                y = math.max(90, y)
+                items[#items + 1] = {
+                    template = T.boxTransparent,
+                    props = { position = v2(x, y), anchor = v2(0.5, 1) },
+                    content = ui.content({ { template = T.padding, content = ui.content({ col(progressLines(site)) }) } }),
+                }
+            end
+        end
+    end
+    if #items == 0 then return clearLabels() end
+    local layout = { layer = 'HUD', props = { relativeSize = v2(1, 1) }, content = ui.content(items) }
+    if labels then
+        labels.layout = layout
+        labels:update()
+    else
+        labels = ui.create(layout)
+    end
+end
+
+---------------------------------------------------------------------------
 
 return {
     engineHandlers = {
@@ -459,6 +527,7 @@ return {
         end,
         onUpdate = function(dt)
             if placing and dt > 0 then updatePlacing(dt) end
+            if dt > 0 then updateLabels(dt) end
         end,
         onLoad = function()
             placing = nil
@@ -470,6 +539,7 @@ return {
             refreshLedger()
         end,
         TMW_Message = function(e) ui.showMessage(e.text) end,
+        TMW_SetDebug = function(on) debugOn = on end,
         TMW_Ghost = function(e)
             if placing and placing.kind == e.kind then placing.obj = e.obj end
         end,

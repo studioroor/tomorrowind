@@ -291,6 +291,65 @@ handlers['fight'] = {
 
 ---------------------------------------------------------------------------
 
+---------------------------------------------------------------------------
+-- carrying and clothing
+
+local CARRY_VFX = 'tmw_carry'
+local carrying -- model currently shown in hand
+
+-- Show the carried resource in the settler's hand (or nothing).
+local function showCarry(model)
+    if model == carrying then return end
+    if carrying then pcall(anim.removeVfx, self, CARRY_VFX) end
+    carrying = nil
+    if model then
+        local ok, err = pcall(anim.addVfx, self, model, {
+            boneName = defs.carryBone, loop = true, vfxId = CARRY_VFX, useAmbientLighting = false,
+        })
+        if ok then carrying = model end
+        if debugOn then print('[Tomorrowind] ' .. tostring(wid) .. ' carry ' .. model .. ' ok=' .. tostring(ok) .. ' ' .. tostring(err or '')) end
+    end
+end
+
+local pendingWear, pendingT -- items given this frame arrive next frame
+local wornCheckT
+
+-- wear: slot name -> item record id, or false to take that slot off
+local function wear(spec)
+    local inv = Actor.inventory(self)
+    for _, id in pairs(spec) do
+        if id and not inv:find(id) then
+            -- not delivered yet: try again shortly
+            if debugOn and not pendingWear then
+                local have = {}
+                for _, item in ipairs(inv:getAll()) do have[#have + 1] = item.recordId end
+                print('[Tomorrowind] ' .. tostring(wid) .. ' waiting for ' .. id .. '; has: ' .. table.concat(have, ', '))
+            end
+            pendingWear, pendingT = spec, 0.25
+            return
+        end
+    end
+    pendingWear = nil
+    local eq = Actor.getEquipment(self)
+    for slotName, id in pairs(spec) do
+        local slot = SLOT[slotName]
+        if slot then eq[slot] = id or nil end
+    end
+    local ok, err = pcall(Actor.setEquipment, self, eq)
+    if debugOn and not ok then print('[Tomorrowind] ' .. tostring(wid) .. ' wear failed: ' .. tostring(err)) end
+    wornCheckT = debugOn and 1 or nil -- equipment changes apply next frame
+end
+
+local function logWorn()
+    local worn = {}
+    for _, item in pairs(Actor.getEquipment(self)) do
+        local okName, r = pcall(function() return item.type.record(item).name end)
+        worn[#worn + 1] = okName and r and r.name or item.recordId
+    end
+    table.sort(worn)
+    print('[Tomorrowind] ' .. tostring(wid) .. ' wears: ' .. table.concat(worn, ', '))
+end
+
 local function stop()
     if cur then cur = nil end
     I.AI.removePackages()
@@ -299,6 +358,8 @@ end
 
 local function onStep(s)
     stop()
+    if debugOn then print('[Tomorrowind] ' .. tostring(wid) .. ' step ' .. tostring(s.op) .. ' carryModel=' .. tostring(s.carryModel)) end
+    showCarry(s.carryModel)
     local h = handlers[s.op]
     if not h then
         cur = s
@@ -310,6 +371,14 @@ local function onStep(s)
 end
 
 local function onUpdate(dt)
+    if wornCheckT and dt > 0 then
+        wornCheckT = wornCheckT - dt
+        if wornCheckT <= 0 then wornCheckT = nil; logWorn() end
+    end
+    if pendingWear and dt > 0 then
+        pendingT = pendingT - dt
+        if pendingT <= 0 then wear(pendingWear) end
+    end
     if wakeT and dt > 0 then
         wakeT = wakeT - dt
         if wakeT <= 0 then
@@ -380,11 +449,13 @@ return {
         onLoad = function(data) wid = data and data.wid end,
         onUpdate = onUpdate,
         onInactive = function() cur = nil end,
+        onActive = function() carrying = nil end, -- vfx don't survive unloading
     },
     eventHandlers = {
         TMW_Step = onStep,
         TMW_Stop = stop,
         TMW_SetDebug = function(on) debugOn = on end,
         TMW_TrainGuard = trainAsGuard,
+        TMW_Wear = wear,
     },
 }

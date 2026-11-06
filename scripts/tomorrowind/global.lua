@@ -191,6 +191,8 @@ local function sendStep(wid, moveTo)
     for k, v in pairs(st) do msg[k] = v end
     msg.token = tokenCounter
     if st.tool then msg.tool = rec().tools[st.tool] end
+    local w = c.workers[wid]
+    msg.carryModel = w.carry and defs.carryModels[w.carry.res] or nil
     if st.op == 'fight' then
         -- guards go for the nearest enemy
         local best, bestD
@@ -232,6 +234,35 @@ local function startNextTask(wid)
     sendStep(wid)
 end
 
+-- Dress a settler for their job: the colony shirt plus job gear. Old job
+-- gear is taken away (otherwise auto-equip would put it straight back on).
+-- Prisoners keep their own clothes.
+local function dress(wid)
+    local w = c.workers[wid]
+    local o = objs.workers[wid]
+    if not w or w.prisoner or not o or not o:isValid() then return end
+    local job
+    if w.assignment == 'builder' then
+        job = 'Builder'
+    elseif w.assignment and c.sites[w.assignment] then
+        job = defs.buildings[c.sites[w.assignment].kind].job
+    end
+    local uniformIds = rec().uniform
+    local wear = {}
+    for _, slot in ipairs(defs.uniform.managed) do wear[slot] = false end
+    for slot, piece in pairs(defs.uniform.base) do wear[slot] = uniformIds[piece.template] end
+    for slot, piece in pairs(job and defs.uniform.jobs[job] or {}) do wear[slot] = uniformIds[piece.template] end
+    local wanted = {}
+    for _, id in pairs(wear) do if id then wanted[id] = true end end
+    local inv = types.Actor.inventory(o)
+    for _, id in pairs(uniformIds) do
+        local item = inv:find(id)
+        if item and not wanted[id] then item:remove() end
+        if wanted[id] and not item then world.createObject(id):moveInto(inv) end
+    end
+    o:sendEvent('TMW_Wear', wear)
+end
+
 local function spawnWorker()
     local store = c.sites[c.storehouse]
     if not store then return end
@@ -249,6 +280,7 @@ local function spawnWorker()
     o:addScript(WORKER_SCRIPT, { wid = w.id })
     if debugOn then o:sendEvent('TMW_SetDebug', true) end
     objs.workers[w.id] = o
+    dress(w.id)
     rebuildIndex()
     message(name .. ' has joined the colony.')
     log('worker joined', w.id, name)
@@ -325,6 +357,7 @@ local function snapshot()
         snap.sites[#snap.sites + 1] = {
             id = sid, kind = s.kind, name = defs.buildings[s.kind].name,
             built = s.built, status = C.siteStatus(c, sid),
+            progress = C.siteProgress(c, sid),
             pos = v3(s.pos), radius = siteRadius(sid),
         }
     end
@@ -560,6 +593,7 @@ local function assign(e)
     local ok, err = C.assign(c, e.wid, e.target or nil)
     if not ok then return message(err) end
     if C.isGuard(c, e.wid) then equipGuard(e.wid) end
+    dress(e.wid)
     tokens[e.wid] = nil -- replan on next active pass
     local o = objs.workers[e.wid]
     if o and o:isValid() then o:sendEvent('TMW_Stop') end
@@ -661,6 +695,7 @@ local function debugCommand(e)
         log('spawned test hostile')
     elseif e.cmd == 'debug' then
         debugOn = e.on
+        if player() then player():sendEvent('TMW_SetDebug', e.on) end
         for _, o in pairs(objs.workers) do
             if o:isValid() then o:sendEvent('TMW_SetDebug', e.on) end
         end
