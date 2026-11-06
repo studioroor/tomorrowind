@@ -82,6 +82,16 @@ local closeLedger -- forward
 
 local function send(name, data) core.sendGlobalEvent(name, data or {}) end
 
+-- Tell the colony when the player is attacked near it (the global script
+-- checks the distance), so guards come to help.
+if I.Combat then
+    I.Combat.addOnHitHandler(function(attack)
+        if snap.founded and attack.attacker then
+            send('TMW_Attacked', { victim = self.object, attacker = attack.attacker })
+        end
+    end)
+end
+
 local function overviewTab()
     local items = {}
     local stockRow = {}
@@ -94,7 +104,11 @@ local function overviewTab()
     items[#items + 1] = row(stockRow)
     local pop = string.format('Settlers: %d / %d beds', snap.pop, snap.beds)
     if snap.pending > 0 then pop = pop .. string.format(' (%d on the way)', snap.pending) end
+    if (snap.cells or 0) > 0 or (snap.prisoners or 0) > 0 then
+        pop = pop .. string.format('     Prisoners: %d / %d cells', snap.prisoners or 0, snap.cells or 0)
+    end
     items[#items + 1] = text(pop)
+    if snap.underAttack then items[#items + 1] = text('THE COLONY IS UNDER ATTACK', nil, true) end
     items[#items + 1] = gap(1, 10)
     items[#items + 1] = text('Buildings', nil, true)
     for _, s in ipairs(snap.sites) do

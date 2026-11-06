@@ -54,6 +54,22 @@ name and face.
 - Work continues while you're away or resting. Off-screen settlers are
   simulated at the same rates.
 
+### Defense
+
+| Building | Cost | Does |
+|---|---|---|
+| Guard Post | 10 Timber, 2 Ingots | 2 guard jobs; guards get a sword, chitin armour and training |
+| Stockade | 24 Timber, 2 Ingots | holds 4 prisoners |
+
+- When a settler (or you, near the colony) is attacked, the alarm goes up:
+  settlers run for the storehouse, guards fight the nearest attacker.
+- With room in the stockade, attacking NPCs are **taken alive**: blows that
+  would take them below 40% health knock them out instead. They wake up as
+  prisoners, without their weapons, locked up in the stockade.
+- Put prisoners to **forced labour** in the Ore Vein or Woodcutter's Camp
+  from the Workers tab. They don't need beds.
+- Creatures, and attackers when the stockade is full, are fought to the death.
+
 ### Building on slopes
 
 OpenMW can't change terrain at runtime, so slopes are *leveled* instead:
@@ -72,6 +88,7 @@ scripts/tomorrowind/
                     hauling, construction, hunger, arrivals, off-screen sim
   core/terrain.lua  slope analysis: floor level, foundation cost
   records.lua       runtime records: tools, buildings, unique settlers
+  captive.lua       on attackers: turns lethal blows into a knockout
   global.lua        connects the core to the world: spawns settlers and
                     buildings, sends each settler its next step, save/load
   worker.lua        on each settler: walk (navmesh + stuck recovery),

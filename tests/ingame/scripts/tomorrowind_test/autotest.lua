@@ -9,7 +9,7 @@ local nearby = require('openmw.nearby')
 local types = require('openmw.types')
 local terrain = require('scripts.tomorrowind.core.terrain')
 
-local DURATION = tonumber(os and os.getenv and os.getenv('TMW_TEST_SECONDS')) or 150
+local DURATION = 190
 local t = 0
 local snap
 local done = {}
@@ -118,11 +118,31 @@ return {
                 if ws[2] then core.sendGlobalEvent('TMW_Assign', { wid = ws[2].id, target = siteId('smelter') }) end
                 -- ws[3] stays a laborer and should haul + build the farm
             end)
-            once('farm_job', 70, function()
-                local farm = siteId('farm')
-                log('farm built?', farm ~= nil)
-                if farm and snap.workers[3] then
-                    core.sendGlobalEvent('TMW_Assign', { wid = snap.workers[3].id, target = farm })
+            -- defense: guard post + stockade, one guard, then a bandit attacks
+            once('debug_on', 64, function() core.sendGlobalEvent('TMW_Debug', { cmd = 'debug', on = true }) end)
+            once('defense_build', 66, function()
+                core.sendGlobalEvent('TMW_Debug', { cmd = 'build', kind = 'guardpost', pos = offset(350, 450), built = true })
+                core.sendGlobalEvent('TMW_Debug', { cmd = 'build', kind = 'stockade', pos = offset(-900, 1100), built = true })
+            end)
+            once('guard_job', 70, function()
+                local post = siteId('guardpost')
+                log('guard post?', post ~= nil, 'farm built?', siteId('farm') ~= nil)
+                if post and snap.workers[3] then
+                    core.sendGlobalEvent('TMW_Assign', { wid = snap.workers[3].id, target = post })
+                end
+            end)
+            once('camera_fight', 75, function()
+                core.sendGlobalEvent('TMW_Debug', { cmd = 'tp', pos = offset(-400, -600), lookAt = offset(300, 0) })
+            end)
+            once('hostile', 78, function()
+                core.sendGlobalEvent('TMW_Debug', { cmd = 'hostile', pos = offset(700, -500) })
+            end)
+            once('prisoner_job', 104, function()
+                for _, w in ipairs(snap.workers) do
+                    if w.prisoner then
+                        core.sendGlobalEvent('TMW_Assign', { wid = w.id, target = siteId('mine') })
+                        log('assigning prisoner', w.name, 'to the mine')
+                    end
                 end
             end)
             once('ledger_open', 98, function() self:sendEvent('TMW_DebugLedger', { open = true, tab = 'workers' }) end)

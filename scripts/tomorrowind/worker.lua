@@ -24,6 +24,8 @@ local GOTO_TIMEOUT = 90
 
 local wid
 local cur        -- current step (from global) + runtime fields
+local wakeT      -- prisoners: seconds until they come round
+local debugOn = defs.debug
 
 local function flat(v) return util.vector3(v.x, v.y, 0) end
 local function dist2d(a, b) return (flat(a) - flat(b)):length() end
@@ -150,7 +152,7 @@ handlers['goto'] = {
             end
             if moved < STUCK_MOVE or not travelling then
                 s.stuck = s.stuck + 1
-                if defs.debug then print(string.format('[Tomorrowind] %s stuck #%d: d=%.0f toCenter=%.0f standoff=%.0f moved=%.0f travelling=%s stance=%s lower=%s swingPlaying=%s',
+                if debugOn then print(string.format('[Tomorrowind] %s stuck #%d: d=%.0f toCenter=%.0f standoff=%.0f moved=%.0f travelling=%s stance=%s lower=%s swingPlaying=%s',
                     tostring(wid), s.stuck, d, toCenter, standoff, moved, tostring(travelling),
                     tostring(Actor.getStance(self)), tostring(anim.getActiveGroup(self, anim.BONE_GROUP.LowerBody)),
                     tostring(anim.isPlaying(self, SWING_GROUP)))) end
@@ -195,7 +197,7 @@ handlers['work'] = {
                 if s.checkSwing <= 0 then
                     s.checkSwing = nil
                     if s.swings == 1 then
-                        if defs.debug then print(string.format('[Tomorrowind] %s swing check: facingError=%.0fdeg playing=%s weapon=%s stance=%s',
+                        if debugOn then print(string.format('[Tomorrowind] %s swing check: facingError=%.0fdeg playing=%s weapon=%s stance=%s',
                             tostring(wid), math.deg(s.center and yawError(s.center) or 0), tostring(anim.isPlaying(self, SWING_GROUP)),
                             tostring(Actor.getEquipment(self, SLOT.CarriedRight) and Actor.getEquipment(self, SLOT.CarriedRight).recordId),
                             tostring(Actor.getStance(self)))) end
@@ -254,6 +256,39 @@ handlers['idle'] = {
     end,
 }
 
+-- Guards: fight the given enemy until it is dead, knocked out or gone.
+handlers['fight'] = {
+    start = function(s)
+        clearScripted()
+        s.t = 0
+        if s.targetObj and s.targetObj:isValid() then
+            I.AI.startPackage({ type = 'Combat', target = s.targetObj, cancelOther = true })
+        end
+    end,
+    update = function(s, dt)
+        s.t = s.t + dt
+        local t = s.targetObj
+        if not t or not t:isValid() or Actor.isDead(t) then return true end
+        if Actor.stats.dynamic.fatigue(t).current < 0 then
+            I.AI.removePackages('Combat') -- don't beat an unconscious enemy
+            return true
+        end
+        if s.t > 120 then return true end
+        local pkg = I.AI.getActivePackage()
+        s.logT = (s.logT or 0) - dt
+        if debugOn and s.logT <= 0 then
+            s.logT = 3
+            print(string.format('[Tomorrowind] %s fight: target=%s dist=%.0f pkg=%s stance=%s targetHp=%.0f targetFatigue=%.0f',
+                tostring(wid), t.recordId, (t.position - self.position):length(), pkg and pkg.type or 'none',
+                tostring(Actor.getStance(self)), Actor.stats.dynamic.health(t).current, Actor.stats.dynamic.fatigue(t).current))
+        end
+        if not pkg or pkg.type ~= 'Combat' then
+            I.AI.startPackage({ type = 'Combat', target = t, cancelOther = true })
+        end
+        return false
+    end,
+}
+
 ---------------------------------------------------------------------------
 
 local function stop()
@@ -275,6 +310,14 @@ local function onStep(s)
 end
 
 local function onUpdate(dt)
+    if wakeT and dt > 0 then
+        wakeT = wakeT - dt
+        if wakeT <= 0 then
+            wakeT = nil
+            local f = Actor.stats.dynamic.fatigue(self)
+            if f.current < f.base * 0.3 then f.current = f.base * 0.3 end
+        end
+    end
     if not cur or dt <= 0 then return end
     local h = handlers[cur.op]
     local s = cur
@@ -289,7 +332,41 @@ local function calm()
         ai.hello(self).base = 0
         ai.fight(self).base = 0
         ai.alarm(self).base = 0
+        ai.flee(self).base = 0
     end)
+end
+
+-- Tell the colony when someone hits this settler.
+if I.Combat then
+    I.Combat.addOnHitHandler(function(attack)
+        local a = attack.attacker
+        if a and a.id ~= self.id then
+            core.sendGlobalEvent('TMW_Attacked', { victim = self.object, attacker = a })
+        end
+    end)
+end
+
+-- Guard training: enough skill to win a fight against a common bandit.
+local function trainAsGuard()
+    pcall(function()
+        local skills = types.NPC.stats.skills
+        local function atLeast(stat, v) if stat.base < v then stat.base = v end end
+        atLeast(skills.longblade(self), 45)
+        atLeast(skills.lightarmor(self), 35)
+        atLeast(skills.block(self), 25)
+        atLeast(Actor.stats.attributes.strength(self), 50)
+    end)
+end
+
+-- A captured enemy: stop fighting, drop weapons, wake up soon.
+local function becomePrisoner()
+    I.AI.removePackages()
+    local eq = Actor.getEquipment(self)
+    eq[SLOT.CarriedRight] = nil
+    eq[SLOT.CarriedLeft] = nil
+    pcall(Actor.setEquipment, self, eq)
+    setStance(Actor.STANCE.Nothing)
+    wakeT = 4
 end
 
 return {
@@ -297,6 +374,7 @@ return {
         onInit = function(data)
             wid = data and data.wid
             calm()
+            if data and data.prisoner then becomePrisoner() end
         end,
         onSave = function() return { wid = wid } end,
         onLoad = function(data) wid = data and data.wid end,
@@ -306,5 +384,7 @@ return {
     eventHandlers = {
         TMW_Step = onStep,
         TMW_Stop = stop,
+        TMW_SetDebug = function(on) debugOn = on end,
+        TMW_TrainGuard = trainAsGuard,
     },
 }

@@ -65,6 +65,8 @@ function C.new()
         workers = {},
         workerOrder = {},
         storehouse = nil,
+        threats = {},          -- tid -> { id=, name= } (enemies attacking the colony)
+        threatOrder = {},
         arrivalTimer = 0,
         pendingArrivals = 0,
         events = {},
@@ -89,8 +91,34 @@ function C.beds(c)
     return n
 end
 
+-- Free settlers (prisoners live in the stockade, not in beds).
 function C.population(c)
-    return #c.workerOrder
+    local n = 0
+    for _, wid in ipairs(c.workerOrder) do
+        if not c.workers[wid].prisoner then n = n + 1 end
+    end
+    return n
+end
+
+function C.prisonerCount(c)
+    return #c.workerOrder - C.population(c)
+end
+
+-- Stockade capacity and the stockade site to send prisoners to.
+function C.cells(c)
+    local n, sid = 0, nil
+    for _, id in ipairs(c.siteOrder) do
+        local s = c.sites[id]
+        if s.built and def(s).cells then
+            n = n + def(s).cells
+            sid = sid or id
+        end
+    end
+    return n, sid
+end
+
+function C.canTakePrisoner(c)
+    return C.cells(c) > C.prisonerCount(c)
 end
 
 function C.assignedTo(c, sid)
@@ -242,6 +270,7 @@ function C.addWorker(c, info)
         id = newId(c, 'w'),
         name = info.name or 'Worker',
         recordId = info.recordId,
+        prisoner = info.prisoner or nil,
         assignment = nil,      -- site id, 'builder', or nil (laborer)
         fed = 1,
         task = nil,
@@ -268,6 +297,13 @@ function C.assign(c, wid, target)
     local w = c.workers[wid]
     if not w then return false, 'no such worker' end
     if target == false then target = nil end
+    if w.prisoner then
+        if target == 'builder' then return false, 'prisoners cannot build' end
+        local ps = target and c.sites[target]
+        if ps and not defs.prisonerJobs[def(ps).job or ''] then
+            return false, 'prisoners can only mine or cut wood'
+        end
+    end
     if target ~= nil and target ~= 'builder' then
         local s = c.sites[target]
         if not s then return false, 'no such building' end
@@ -296,13 +332,47 @@ function C.assignmentOptions(c)
     return opts
 end
 
-function C.assignmentLabel(c, target)
-    if target == nil or target == false then return 'Laborer' end
+function C.assignmentLabel(c, target, prisoner)
+    if target == nil or target == false then return prisoner and 'Prisoner' or 'Laborer' end
     if target == 'builder' then return 'Builder' end
     local s = c.sites[target]
     if not s then return '?' end
     return def(s).job .. ' (' .. def(s).name .. ')'
 end
+
+---------------------------------------------------------------------------
+-- threats
+
+function C.addThreat(c, info)
+    local t = { id = newId(c, 't'), name = info.name or 'an attacker' }
+    c.threats[t.id] = t
+    c.threatOrder[#c.threatOrder + 1] = t.id
+    emit(c, { kind = 'alarm', threat = t.id })
+    emit(c, { kind = 'msg', text = 'The colony is under attack by ' .. t.name .. '!' })
+    return t.id
+end
+
+function C.removeThreat(c, tid)
+    if not c.threats[tid] then return end
+    c.threats[tid] = nil
+    for i, id in ipairs(c.threatOrder) do
+        if id == tid then table.remove(c.threatOrder, i) break end
+    end
+    if #c.threatOrder == 0 then
+        emit(c, { kind = 'all_clear' })
+        emit(c, { kind = 'msg', text = 'The colony is safe again.' })
+    end
+end
+
+function C.underAttack(c)
+    return #c.threatOrder > 0
+end
+
+local function isGuard(c, w)
+    local s = w.assignment and w.assignment ~= 'builder' and c.sites[w.assignment]
+    return s and def(s).guard and true or false
+end
+C.isGuard = function(c, wid) return isGuard(c, c.workers[wid]) end
 
 ---------------------------------------------------------------------------
 -- reservations
@@ -338,10 +408,50 @@ local function eatTask(c)
     }
 end
 
-local function idleTask(c, label, duration)
+local function idleTask(c, label, duration, at)
     return {
         kind = 'idle', label = label,
-        steps = { step('idle', { at = storeId(c), duration = duration or 12, label = label }) },
+        steps = { step('idle', { at = at or storeId(c), duration = duration or 12, label = label }) },
+    }
+end
+
+local function shelterTask(c)
+    local label = 'Sheltering in the storehouse'
+    return {
+        kind = 'shelter', label = label,
+        steps = {
+            step('goto', { to = storeId(c), label = 'Running for the storehouse' }),
+            step('idle', { at = storeId(c), duration = defs.defense.shelterSeconds, label = label, stay = true }),
+        },
+    }
+end
+
+local function fightTask(c, w)
+    local tid = c.threatOrder[1]
+    local t = c.threats[tid]
+    return {
+        kind = 'fight', label = 'Fighting',
+        steps = { step('fight', { target = tid, label = 'Fighting ' .. t.name }) },
+    }
+end
+
+-- Guards walk between the colony's buildings and their post.
+local function patrolTask(c, w, post)
+    local stops = {}
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built and sid ~= post.id then stops[#stops + 1] = sid end
+    end
+    local target = #stops > 0 and stops[math.random(#stops)] or post.id
+    local idle = defs.defense.patrolIdle
+    return {
+        kind = 'patrol', site = post.id, label = 'Patrolling',
+        steps = {
+            step('goto', { to = target, label = 'Patrolling' }),
+            step('idle', { at = target, duration = idle, label = 'Keeping watch', stay = true }),
+            step('goto', { to = post.id, label = 'Returning to the Guard Post' }),
+            step('idle', { at = post.id, duration = idle, label = 'On watch', stay = true }),
+        },
     }
 end
 
@@ -454,15 +564,26 @@ function C.nextTask(c, wid)
     if w.task then C.cancelTask(c, wid) end
     local task
 
-    if w.fed < defs.hunger.eatBelow and C.available(c, 'food') >= 1 then
+    local attacked = C.underAttack(c)
+    local guard = isGuard(c, w)
+    if attacked and guard then
+        task = fightTask(c, w)
+    elseif attacked and not w.prisoner then
+        task = shelterTask(c)
+    elseif w.fed < defs.hunger.eatBelow and C.available(c, 'food') >= 1 then
         task = eatTask(c)
+    elseif w.prisoner and not (w.assignment and c.sites[w.assignment]) then
+        local _, stockade = C.cells(c)
+        task = idleTask(c, 'Locked up', 15, stockade)
     else
         local speed = C.speed(c, wid)
         if speed <= 0 then
             task = idleTask(c, 'Starving - too weak to work', 15)
         else
             local s = w.assignment and w.assignment ~= 'builder' and c.sites[w.assignment]
-            if s then
+            if s and def(s).guard then
+                task = patrolTask(c, w, s)
+            elseif s then
                 if def(s).input then
                     task = processTask(c, w, s, speed)
                 else
@@ -603,6 +724,8 @@ function C.simulateWorker(c, wid, dt)
     if speed <= 0 then return end
 
     local s = w.assignment and w.assignment ~= 'builder' and c.sites[w.assignment]
+    if s and def(s).guard then return end -- guards just keep watch
+    if w.prisoner and not s then return end -- locked up
     if s then
         local d = def(s)
         local cycle = d.cycle + 2 * C.tripSeconds(c, s.id)
@@ -679,6 +802,9 @@ function C.siteStatus(c, sid)
         return txt
     end
     if d.beds then return d.beds .. ' beds' end
+    if d.cells then
+        return string.format('%d/%d prisoners (all cells)', C.prisonerCount(c), (C.cells(c)))
+    end
     return 'Built'
 end
 

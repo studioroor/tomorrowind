@@ -81,17 +81,39 @@ defs.buildings = {
         job = 'Smelter', slots = 2, cycle = 14, input = { ore = 2 }, output = { ingot = 1 },
         tool = 'hammer', footprint = 200,
     },
+    guardpost = {
+        name = 'Guard Post', model = 'meshes/f/furn_banner_hlaalu_01.nif',
+        cost = { wood = 10, ingot = 2 }, work = 20,
+        job = 'Guard', slots = 2, guard = true, footprint = 120,
+    },
+    stockade = {
+        name = 'Stockade', model = 'meshes/x/ex_de_shack_01.nif',
+        cost = { wood = 24, ingot = 2 }, work = 30,
+        cells = 4, footprint = 350, decor = 'stockade',
+    },
     house = {
         name = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_01.nif', cost = { wood = 20, ingot = 4 }, work = 40,
         beds = 4, footprint = 700,
     },
 }
-defs.buildOrder = { 'lumber', 'farm', 'mine', 'smelter', 'house' }
+defs.buildOrder = { 'lumber', 'farm', 'mine', 'smelter', 'house', 'guardpost', 'stockade' }
+
+-- Defense
+defs.defense = {
+    shelterSeconds = 10,      -- settlers wait this long in the storehouse per check
+    patrolIdle = 6,           -- guards pause this long at each patrol stop
+    knockoutBelow = 0.4,      -- with a stockade, enemies below this health fraction get knocked out
+    colonyRadius = 3000,      -- attacks within this range of the storehouse raise the alarm
+}
+defs.guardGear = { 'iron longsword', 'chitin cuirass', 'chitin helm' }
+-- jobs prisoners can be put to (forced labour)
+defs.prisonerJobs = { Miner = true, Woodcutter = true }
 
 defs.builderTool = 'hammer'
 defs.constructionModel = 'meshes/x/ex_de_scaffold_01.nif'
 defs.decorModels = {
     saltrice = 'meshes/o/flora_saltrice_01.nif',
+    fence = 'meshes/x/furn_com_fence_01.nif',
     piling = 'meshes/x/ex_de_docks_piling.nif',
 }
 

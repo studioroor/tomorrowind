@@ -12,6 +12,7 @@ local defs = require('scripts.tomorrowind.defs')
 local records = require('scripts.tomorrowind.records')
 
 local WORKER_SCRIPT = 'scripts/tomorrowind/worker.lua'
+local CAPTIVE_SCRIPT = 'scripts/tomorrowind/captive.lua'
 
 local STATE_INTERVAL = 0.5
 local ACTIVE_INTERVAL = 0.5
@@ -19,7 +20,7 @@ local STEP_WATCHDOG = 150
 
 -- persistent
 local c                      -- colony state (plain table, see core/colony.lua)
-local objs = { sites = {}, workers = {}, decor = {} }
+local objs = { sites = {}, workers = {}, decor = {}, threats = {} }
 local ghost                  -- { obj=, kind= } while the player is placing
 local recIds                 -- ids of our runtime records (see records.lua)
 
@@ -31,6 +32,8 @@ local stateTimer, activeTimer, offscreenDt = 0, 0, 0
 local lastGameTime
 local workerByObj = {}       -- object id -> wid
 local applyGhostMove         -- defined with the placement code below
+local checkThreats           -- defined with the main loop
+local debugOn = defs.debug
 local siteByObj = {}         -- object id -> sid
 
 local function log(...)
@@ -122,6 +125,18 @@ local function spawnDecor(sid)
     local list = {}
     spawnPilings(sid, list)
     objs.decor[sid] = list
+    if d.decor == 'stockade' then
+        -- a ring of fence segments around the cell block
+        local r, n = 420, 12
+        for i = 0, n - 1 do
+            local a = s.yaw + i * 2 * math.pi / n
+            local o = world.createObject(rec().decor.fence)
+            o:teleport('', v3(s.pos) + util.vector3(math.sin(a) * r, math.cos(a) * r, 0),
+                { rotation = util.transform.rotateZ(a + math.pi / 2), onGround = true })
+            list[#list + 1] = o
+        end
+        return
+    end
     if d.decor ~= 'farm' then return end
     local rot = util.transform.rotateZ(s.yaw)
     for ix = -2, 2 do
@@ -176,6 +191,17 @@ local function sendStep(wid, moveTo)
     for k, v in pairs(st) do msg[k] = v end
     msg.token = tokenCounter
     if st.tool then msg.tool = rec().tools[st.tool] end
+    if st.op == 'fight' then
+        -- guards go for the nearest enemy
+        local best, bestD
+        for _, t in pairs(objs.threats) do
+            if t:isValid() then
+                local d = (t.position - o.position):length()
+                if not bestD or d < bestD then best, bestD = t, d end
+            end
+        end
+        msg.targetObj = best or objs.threats[st.target]
+    end
 
     local sid = st.to or st.at or c.storehouse
     local s = c.sites[sid]
@@ -221,6 +247,7 @@ local function spawnWorker()
         world.createObject(toolId):moveInto(types.Actor.inventory(o))
     end
     o:addScript(WORKER_SCRIPT, { wid = w.id })
+    if debugOn then o:sendEvent('TMW_SetDebug', true) end
     objs.workers[w.id] = o
     rebuildIndex()
     message(name .. ' has joined the colony.')
@@ -230,9 +257,22 @@ end
 ---------------------------------------------------------------------------
 -- events from the core
 
+-- Everyone drops what they're doing and re-plans (alarm / all clear).
+local function replanAll()
+    for _, wid in ipairs(c.workerOrder) do
+        C.cancelTask(c, wid)
+        tokens[wid] = nil
+        local o = objs.workers[wid]
+        if o and o:isValid() then o:sendEvent('TMW_Stop') end
+    end
+end
+
 local function processEvents()
     for _, e in ipairs(C.drainEvents(c)) do
-        if e.kind == 'arrival' then
+        if e.kind == 'alarm' or e.kind == 'all_clear' then
+            replanAll()
+            log(e.kind)
+        elseif e.kind == 'arrival' then
             spawnWorker()
         elseif e.kind == 'site_placed' then
             setSiteObject(e.site)
@@ -260,6 +300,8 @@ local function snapshot()
         founded = true,
         stock = {}, available = {},
         beds = C.beds(c), pop = C.population(c), pending = c.pendingArrivals,
+        prisoners = C.prisonerCount(c), cells = (C.cells(c)),
+        underAttack = C.underAttack(c),
         workers = {}, sites = {}, options = {},
         storePos = c.storehouse and v3(c.sites[c.storehouse].pos),
     }
@@ -272,7 +314,8 @@ local function snapshot()
         snap.workers[#snap.workers + 1] = {
             id = wid, name = w.name, obj = objs.workers[wid],
             assignment = w.assignment or false,
-            job = C.assignmentLabel(c, w.assignment),
+            job = C.assignmentLabel(c, w.assignment, w.prisoner),
+            prisoner = w.prisoner,
             status = C.workerStatus(c, wid),
             fed = w.fed,
         }
@@ -326,12 +369,37 @@ local function checkDeaths()
     if changed then rebuildIndex() end
 end
 
+local function distToStore(pos)
+    local store = c.sites[c.storehouse]
+    if not store then return math.huge end
+    return (pos - v3(store.pos)):length()
+end
+
+-- Threats end when the enemy dies, is knocked out (handled by
+-- TMW_Subdued) or runs off.
+checkThreats = function()
+    for tid, o in pairs(objs.threats) do
+        local gone = not o:isValid()
+        local dead = not gone and types.Actor.isDead(o)
+        local fled = not gone and not dead and distToStore(o.position) > defs.defense.colonyRadius * 1.5
+        if gone or dead or fled then
+            local name = c.threats[tid] and c.threats[tid].name or 'The attacker'
+            objs.threats[tid] = nil
+            C.removeThreat(c, tid)
+            if dead then message(name .. ' is dead.') elseif fled then message(name .. ' fled.') end
+            log('threat over', tid, dead and 'dead' or fled and 'fled' or 'gone')
+        end
+    end
+    processEvents()
+end
+
 local function updateWorkers(dt)
     offscreenDt = offscreenDt + dt
     activeTimer = activeTimer + dt
     if activeTimer < ACTIVE_INTERVAL then return end
     activeTimer = 0
     checkDeaths()
+    checkThreats()
     local active = activeSet()
     for _, wid in ipairs(c.workerOrder) do
         local w = c.workers[wid]
@@ -425,10 +493,73 @@ local function onStepDone(e)
     processEvents()
 end
 
+local function recordName(o)
+    local ok, r = pcall(function() return o.type.record(o) end)
+    return ok and r and r.name or 'an attacker'
+end
+
+local function onAttacked(e)
+    local a = e.attacker
+    if not c or not a or not a:isValid() then return end
+    if a.type == types.Player or workerByObj[a.id] then return end
+    if types.Actor.isDead(a) or distToStore(a.position) > defs.defense.colonyRadius then return end
+    for _, o in pairs(objs.threats) do
+        if o.id == a.id then return end
+    end
+    local tid = C.addThreat(c, { name = recordName(a) })
+    objs.threats[tid] = a
+    -- with room in the stockade, NPC attackers are taken alive
+    if a.type == types.NPC and C.canTakePrisoner(c) and not a:hasScript(CAPTIVE_SCRIPT) then
+        a:addScript(CAPTIVE_SCRIPT)
+    end
+    log('threat', tid, recordName(a))
+    processEvents()
+end
+
+local function onSubdued(e)
+    local a = e.actor
+    if not c or not a or not a:isValid() then return end
+    for tid, o in pairs(objs.threats) do
+        if o.id == a.id then
+            objs.threats[tid] = nil
+            C.removeThreat(c, tid)
+        end
+    end
+    if a:hasScript(CAPTIVE_SCRIPT) then a:removeScript(CAPTIVE_SCRIPT) end
+    if not C.canTakePrisoner(c) or workerByObj[a.id] then
+        processEvents()
+        return
+    end
+    local name = recordName(a)
+    local w = C.addWorker(c, { name = name, recordId = a.recordId, prisoner = true })
+    for _, toolId in pairs(rec().tools) do
+        world.createObject(toolId):moveInto(types.Actor.inventory(a))
+    end
+    a:addScript(WORKER_SCRIPT, { wid = w.id, prisoner = true })
+    objs.workers[w.id] = a
+    rebuildIndex()
+    message(name .. ' has been knocked out and taken prisoner.')
+    log('prisoner', w.id, name)
+    processEvents()
+end
+
+-- Guards get a sword and some chitin the first time they're posted.
+local function equipGuard(wid)
+    local w = c.workers[wid]
+    local o = objs.workers[wid]
+    if w.geared or not o or not o:isValid() then return end
+    for _, id in ipairs(defs.guardGear) do
+        world.createObject(id):moveInto(types.Actor.inventory(o))
+    end
+    o:sendEvent('TMW_TrainGuard')
+    w.geared = true
+end
+
 local function assign(e)
     if not c then return end
     local ok, err = C.assign(c, e.wid, e.target or nil)
     if not ok then return message(err) end
+    if C.isGuard(c, e.wid) then equipGuard(e.wid) end
     tokens[e.wid] = nil -- replan on next active pass
     local o = objs.workers[e.wid]
     if o and o:isValid() then o:sendEvent('TMW_Stop') end
@@ -517,6 +648,22 @@ local function debugCommand(e)
                 log(string.format('leveled site %s %s floor=%.0f wood=%s work=%s', sid, s.kind, s.pos.z, tostring(s.cost.wood), tostring(s.levelWork)))
             end
         end
+    elseif e.cmd == 'hostile' and c then
+        -- a test bandit that attacks the first settler
+        local base = types.NPC.records['assumanu mantiti']
+        local r = world.createRecord(types.NPC.createRecordDraft({ template = base, name = 'Test Bandit', isMale = true,
+            head = 'b_n_dark elf_m_head_04', hair = 'b_n_dark elf_m_hair_05', class = 'commoner' }))
+        local o = world.createObject(r.id)
+        o:teleport('', e.pos, { onGround = true })
+        world.createObject('iron club'):moveInto(types.Actor.inventory(o))
+        local victim = objs.workers[c.workerOrder[1]]
+        if victim then o:sendEvent('StartAIPackage', { type = 'Combat', target = victim }) end
+        log('spawned test hostile')
+    elseif e.cmd == 'debug' then
+        debugOn = e.on
+        for _, o in pairs(objs.workers) do
+            if o:isValid() then o:sendEvent('TMW_SetDebug', e.on) end
+        end
     elseif e.cmd == 'dump' then
         log('state', c and C.population(c), c and c.stock.food)
     end
@@ -554,6 +701,7 @@ return {
             c = data.colony
             objs = data.objs or { sites = {}, workers = {}, decor = {} }
             objs.decor = objs.decor or {}
+            objs.threats = objs.threats or {}
             recIds = data.recIds
             ghost = data.ghost
             removeGhost() -- placement does not survive a reload
@@ -577,5 +725,7 @@ return {
         TMW_RemoveSite = removeSite,
         TMW_RequestState = pushState,
         TMW_Debug = debugCommand,
+        TMW_Attacked = onAttacked,
+        TMW_Subdued = onSubdued,
     },
 }
