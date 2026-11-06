@@ -17,9 +17,14 @@ window mode = 2
 [Sound]
 master volume = 0
 CFG
-OPENMW=/Applications/OpenMW.app/Contents/MacOS/openmw
+OPENMW="${OPENMW:-/Applications/OpenMW.app/Contents/MacOS/openmw}"
+# load the mod unless the user's own config already does
+MOD_ARGS=(--data "$ROOT" --content Tomorrowind.esp --content Tomorrowind.omwscripts)
+if grep -q '^content=Tomorrowind.esp' "$HOME/Library/Preferences/openmw/openmw.cfg" 2>/dev/null; then
+  MOD_ARGS=()
+fi
 "$OPENMW" --config "$OUT/cfg" --user-data "$OUT/userdata" \
-  --data "$ROOT" --content Tomorrowind.esp --content Tomorrowind.omwscripts \
+  ${MOD_ARGS[@]+"${MOD_ARGS[@]}"} \
   --data "$ROOT/tests/ingame" --content autotest.omwscripts \
   --skip-menu --start "$CELL" --no-sound --no-grab \
   > "$OUT/stdout.log" 2>&1 &
