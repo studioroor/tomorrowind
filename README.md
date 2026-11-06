@@ -1,6 +1,6 @@
 # Tomorrowind
 
-An OpenMW (0.49+) mod about founding and running a House Hlaalu colony:
+An OpenMW (**0.52+**) mod about founding and running a House Hlaalu colony:
 assign settlers to jobs, mine, farm, smelt, haul and build, and place
 buildings anywhere you like.
 
@@ -11,13 +11,11 @@ You found the colony wherever you're standing.
 
 1. In the OpenMW launcher, open **Data Files → Directories** and add this
    folder (`tomorrowind/`).
-2. Enable `Tomorrowind.esp` and `Tomorrowind.omwscripts` in the content list.
+2. Enable `Tomorrowind.omwscripts` in the content list.
 
-`Tomorrowind.esp` is generated. To rebuild it:
-
-```sh
-python3 tools/build_plugin.py "/path/to/Morrowind/Data Files"
-```
+There is no `.esp`: tools, buildings and settlers are created as records at
+runtime (OpenMW 0.52 Lua). Every settler is a unique Dunmer with their own
+name and face.
 
 ## Playing
 
@@ -56,6 +54,15 @@ python3 tools/build_plugin.py "/path/to/Morrowind/Data Files"
 - Work continues while you're away or resting. Off-screen settlers are
   simulated at the same rates.
 
+### Building on slopes
+
+OpenMW can't change terrain at runtime, so slopes are *leveled* instead:
+the building sits level, sunk into the uphill side, and timber pilings
+hold up the downhill side. The steeper the spot, the more **foundation
+timber** and **leveling work** it needs (shown while placing). Sites show
+*Leveling the ground* before *Under construction*. Only ground that would
+bury too much of the building is refused (taller buildings may sink deeper).
+
 ## How it works
 
 ```
@@ -63,6 +70,8 @@ scripts/tomorrowind/
   defs.lua          buildings, resources, timings (tune the game here)
   core/colony.lua   pure-Lua simulation: task planner, reservations,
                     hauling, construction, hunger, arrivals, off-screen sim
+  core/terrain.lua  slope analysis: floor level, foundation cost
+  records.lua       runtime records: tools, buildings, unique settlers
   global.lua        connects the core to the world: spawns settlers and
                     buildings, sends each settler its next step, save/load
   worker.lua        on each settler: walk (navmesh + stuck recovery),

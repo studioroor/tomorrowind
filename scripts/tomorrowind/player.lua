@@ -11,15 +11,16 @@ local camera = require('openmw.camera')
 local nearby = require('openmw.nearby')
 local self = require('openmw.self')
 local I = require('openmw.interfaces')
+local types = require('openmw.types')
 
 local defs = require('scripts.tomorrowind.defs')
+local terrain = require('scripts.tomorrowind.core.terrain')
 
 local T = I.MWUI.templates
 local v2 = util.vector2
 
 local LEDGER_KEY = input.KEY.K
 local COLONY_RADIUS = 7000
-local MAX_SLOPE_Z = 0.8       -- min normal.z of the ground under a building
 local ROTATE_SPEED = 1.6      -- rad/s while holding Z/X
 
 local snap = { founded = false }
@@ -279,9 +280,16 @@ local function stopPlacing(confirm)
     if confirm then
         if not placing.valid then
             ui.showMessage('Cannot build here: ' .. (placing.reason or '?'))
+            local an = placing.analysis or {}
+            print(string.format('[Tomorrowind] placement refused: %s at %s (footprint r=%.0f, ground %.0f..%.0f)',
+                tostring(placing.reason), tostring(placing.pos), placing.radius or -1, an.low or -1, an.high or -1))
             return
         end
-        send('TMW_PlaceConfirm', { pos = placing.pos, yaw = placing.yaw })
+        local a = placing.analysis
+        send('TMW_PlaceConfirm', {
+            pos = placing.pos, yaw = placing.yaw,
+            foundation = { wood = a.wood, work = a.work, depth = a.depth },
+        })
     else
         send('TMW_PlaceCancel')
     end
@@ -289,43 +297,90 @@ local function stopPlacing(confirm)
     clearHud()
 end
 
-local function ghostRadius()
+-- Footprint radius and height of the building being placed, from the
+-- preview's bounding box (falls back to the defs footprint).
+local function ghostSize()
     local d = defs.buildings[placing.kind]
     if placing.obj and placing.obj:isValid() then
         local ok, box = pcall(placing.obj.getBoundingBox, placing.obj)
         if ok and box and box.halfSize.x > 1 and box.halfSize.x < 5000 then
-            return math.max(box.halfSize.x, box.halfSize.y)
+            return math.max(box.halfSize.x, box.halfSize.y), box.halfSize.z * 2
         end
     end
-    return d.footprint
+    return d.footprint, nil
 end
 
 local function dist2d(a, b)
     return util.vector2(a.x - b.x, a.y - b.y):length()
 end
 
-local function validate(pos, normal, dt)
-    if normal.z < MAX_SLOPE_Z then return false, 'too steep' end
-    if pos.z < 0 then return false, 'under water' end
+local function groundHeight(x, y)
+    local ok, h = pcall(core.land.getHeightAt, util.vector3(x, y, 0), self.cell)
+    return ok and h or nil
+end
+
+-- Where the view ray meets the terrain, found by stepping along the ray and
+-- comparing with the land height. Unlike a physics ray this can't be
+-- blocked by the player's body or the (moving) preview building.
+local function aimAtGround()
+    if placing.forcedAim then return placing.forcedAim end -- scripted tests
+    local from = camera.getPosition()
+    local dir = camera.viewportToWorldVector(v2(0.5, 0.5))
+    local t, step = 0, 24
+    while t < 4000 do
+        t = t + step
+        local p = from + dir * t
+        local h = groundHeight(p.x, p.y)
+        if h and p.z <= h then return util.vector3(p.x, p.y, h) end
+    end
+end
+
+-- Physics check for real obstructions (trees, rocks, houses) under the
+-- footprint: rays straight down, ignoring the preview building and actors.
+local function obstruction(pos, r, top, bottom)
+    local pts = { { 0, 0 }, { r * 0.6, 0 }, { -r * 0.6, 0 }, { 0, r * 0.6 }, { 0, -r * 0.6 } }
+    for _, d in ipairs(pts) do
+        local from = util.vector3(pos.x + d[1], pos.y + d[2], top)
+        local to = util.vector3(pos.x + d[1], pos.y + d[2], bottom)
+        local res = nearby.castRay(from, to, { collisionType = nearby.COLLISION_TYPE.World, ignore = placing.obj })
+        local o = res.hit and res.hitObject
+        if o and not (placing.obj and o.id == placing.obj.id) and o.type ~= types.NPC and o.type ~= types.Creature then
+            local okName, rec = pcall(function() return o.type.record(o) end)
+            local name = okName and rec and rec.name
+            return (name and name ~= '') and name or o.recordId
+        end
+    end
+end
+
+local function validate(pos, dt)
+    local r, height = ghostSize()
+    placing.radius = r
+    local heights = {}
+    for _, d in ipairs(terrain.samplePoints(r)) do
+        heights[#heights + 1] = groundHeight(pos.x + d[1], pos.y + d[2])
+    end
+    local a = terrain.analyze(heights, height)
+    placing.analysis = a
+    if not a.ok then return false, a.reason end
     if snap.storePos and dist2d(pos, snap.storePos) > COLONY_RADIUS then
         return false, 'too far from the storehouse'
     end
-    local r = ghostRadius()
     for _, s in ipairs(snap.sites or {}) do
         if dist2d(pos, s.pos) < (s.radius + r) * 0.75 then
             return false, 'too close to the ' .. s.name
         end
     end
-    -- walkable ground next to the footprint (catches water, cliffs,
-    -- islands). A full path check is unreliable here: the ghost has
-    -- collision and moves every frame, so it keeps cutting the navmesh.
-    placing.pathT = placing.pathT - dt
-    if placing.pathT <= 0 then
-        placing.pathT = 0.3
+    -- the slower checks run a few times per second
+    placing.checkT = (placing.checkT or 0) - dt
+    if placing.checkT <= 0 then
+        placing.checkT = 0.3
+        placing.blocker = obstruction(pos, r, a.high + 800, a.low - 50)
+        -- walkable ground next to the footprint (catches water, cliffs, islands)
         local ok, nav = pcall(nearby.findNearestNavMeshPosition, pos,
             { searchAreaHalfExtents = util.vector3(r + 400, r + 400, 600) })
         placing.reachable = (not ok) or (nav ~= nil and dist2d(nav, pos) < r + 400)
     end
+    if placing.blocker then return false, 'something is in the way (' .. placing.blocker .. ')' end
     if not placing.reachable then return false, 'workers cannot walk there' end
     return true
 end
@@ -334,41 +389,37 @@ local function updatePlacing(dt)
     if input.isKeyPressed(input.KEY.Z) then placing.yaw = placing.yaw - ROTATE_SPEED * dt end
     if input.isKeyPressed(input.KEY.X) then placing.yaw = placing.yaw + ROTATE_SPEED * dt end
 
-    local from = camera.getPosition()
-    local dir = camera.viewportToWorldVector(v2(0.5, 0.5))
-    -- castRay ignores only one object per call: skip past the player's own
-    -- body and the ghost building by recasting from just beyond them.
-    local to = from + dir * 4000
-    local res = nearby.castRay(from, to, { collisionType = nearby.COLLISION_TYPE.Default, ignore = self })
-    for _ = 1, 3 do
-        local o = res.hit and res.hitObject
-        local isGhost = o and placing.obj and placing.obj:isValid() and o.id == placing.obj.id
-        if not (o and (isGhost or o.id == self.id)) then break end
-        res = nearby.castRay(res.hitPos + dir * 2, to, { collisionType = nearby.COLLISION_TYPE.Default, ignore = o })
-    end
     local d = defs.buildings[placing.kind]
-    placing.logT = (placing.logT or 0) - dt
-    if placing.logT <= 0 then
-        placing.logT = 1
-        if defs.debug then print(string.format('[Tomorrowind] placing: from=%s dir=%s hit=%s pos=%s normal=%s valid=%s reason=%s',
-            tostring(from), tostring(dir), tostring(res.hit), tostring(res.hitPos), tostring(res.hitNormal),
-            tostring(placing.valid), tostring(placing.reason))) end
-    end
-    if res.hit and res.hitObject then
-        local name = res.hitObject.type.record(res.hitObject).name
-        placing.valid, placing.reason = false, 'something is in the way (' .. ((name and name ~= '') and name or res.hitObject.recordId) .. ')'
-    elseif res.hit then
-        placing.pos = res.hitPos
-        placing.valid, placing.reason = validate(res.hitPos, res.hitNormal, dt)
-        send('TMW_PlaceMove', { pos = res.hitPos, yaw = placing.yaw })
+    local hit = aimAtGround()
+    local extra
+    if hit then
+        placing.valid, placing.reason = validate(hit, dt)
+        local a = placing.analysis
+        local level = (a and a.level) or hit.z
+        placing.pos = util.vector3(hit.x, hit.y, level)
+        send('TMW_PlaceMove', { pos = placing.pos, yaw = placing.yaw })
+        if a and a.ok and a.wood > 0 then
+            extra = string.format('Sloped ground: foundation +%d Timber, +%ds leveling work', a.wood, a.work)
+        end
     else
         placing.valid, placing.reason = false, 'look at open ground'
     end
-    setHud({
+    if defs.debug then
+        placing.logT = (placing.logT or 0) - dt
+        if placing.logT <= 0 then
+            placing.logT = 1
+            print(string.format('[Tomorrowind] placing: hit=%s valid=%s reason=%s depth=%s',
+                tostring(hit), tostring(placing.valid), tostring(placing.reason),
+                tostring(placing.analysis and placing.analysis.depth)))
+        end
+    end
+    local lines = {
         text('Placing: ' .. d.name .. '   (' .. costText(d.cost) .. ')', nil, true),
         text('Z / X rotate     Enter place     Backspace cancel'),
-        text(placing.valid and 'Good spot' or ('Cannot build: ' .. (placing.reason or '')), nil, not placing.valid),
-    })
+    }
+    if extra then lines[#lines + 1] = text(extra) end
+    lines[#lines + 1] = text(placing.valid and 'Good spot' or ('Cannot build: ' .. (placing.reason or '')), nil, not placing.valid)
+    setHud(lines)
 end
 
 ---------------------------------------------------------------------------
@@ -421,7 +472,12 @@ return {
             if e.open then openLedger(e.tab) else closeLedger() end
         end,
         TMW_DebugPlace = function(e)
-            if e.kind then startPlacing(e.kind) else stopPlacing(e.confirm) end
+            if e.kind then
+                startPlacing(e.kind)
+                placing.forcedAim = e.at
+            else
+                stopPlacing(e.confirm)
+            end
         end,
         UiModeChanged = function(e)
             -- player pressed Escape or opened another menu

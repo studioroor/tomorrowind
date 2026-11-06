@@ -119,16 +119,25 @@ end
 ---------------------------------------------------------------------------
 -- sites
 
-function C.addSite(c, kind, pos, yaw, built)
+-- opts.foundation = { wood=, work= } for sloped ground (see core/terrain.lua)
+function C.addSite(c, kind, pos, yaw, built, opts)
     local d = defs.buildings[kind]
     assert(d, 'unknown building ' .. tostring(kind))
+    local foundation = opts and opts.foundation
+    local cost = copy(d.cost)
+    if foundation and foundation.wood and foundation.wood > 0 then
+        cost.wood = (cost.wood or 0) + foundation.wood
+    end
     local site = {
         id = newId(c, 's'),
         kind = kind,
         pos = { x = pos.x, y = pos.y, z = pos.z },
         yaw = yaw or 0,
         built = built and true or false,
-        needs = built and {} or copy(d.cost),
+        cost = cost,                 -- materials incl. foundation
+        work = d.work + (foundation and foundation.work or 0),
+        levelWork = foundation and foundation.work or 0,
+        needs = built and {} or copy(cost),
         incoming = {},
         progress = 0,
         stalled = nil,       -- reason a production site is idle
@@ -172,9 +181,11 @@ local function materialsComplete(s)
 end
 C.materialsComplete = function(c, sid) return materialsComplete(c.sites[sid]) end
 
+local function siteWork(s) return s.work or def(s).work end
+
 local function finishBuilding(c, s)
     s.built = true
-    s.progress = def(s).work
+    s.progress = siteWork(s)
     emit(c, { kind = 'built', site = s.id })
     emit(c, { kind = 'msg', text = def(s).name .. ' is finished.' })
 end
@@ -182,7 +193,21 @@ end
 local function addBuildProgress(c, s, amount)
     if s.built then return end
     s.progress = s.progress + amount
-    if s.progress >= def(s).work then finishBuilding(c, s) end
+    if s.progress >= siteWork(s) then finishBuilding(c, s) end
+end
+
+-- Completes a site immediately (quests, debugging). Undelivered
+-- materials are waived.
+function C.finishSite(c, sid)
+    local s = c.sites[sid]
+    if not s or s.built then return false end
+    for _, wid in ipairs(c.workerOrder) do
+        local w = c.workers[wid]
+        if w.task and w.task.site == sid then C.cancelTask(c, wid) end
+    end
+    s.needs, s.incoming = {}, {}
+    finishBuilding(c, s)
+    return true
 end
 
 -- Removes a site (cancel construction / demolish). Delivered materials
@@ -196,8 +221,7 @@ function C.removeSite(c, sid)
         if w.assignment == sid then w.assignment = nil end
     end
     if not s.built then
-        local d = def(s)
-        for res, n in pairs(d.cost) do
+        for res, n in pairs(s.cost or def(s).cost) do
             local delivered = n - (s.needs[res] or 0)
             c.stock[res] = c.stock[res] + delivered
         end
@@ -403,14 +427,15 @@ local function buildTask(c, speed)
         local s = c.sites[sid]
         if not s.built and materialsComplete(s) then
             local name = def(s).name
+            local leveling = s.progress < (s.levelWork or 0)
             return {
-                kind = 'build', site = sid, label = 'Building',
+                kind = 'build', site = sid, label = leveling and 'Leveling' or 'Building',
                 steps = {
                     step('goto', { to = sid, label = 'Walking to the ' .. name .. ' site' }),
                     step('work', {
                         at = sid, duration = defs.buildWorkPerTrip / speed, tool = defs.builderTool,
                         effect = 'build', amount = defs.buildWorkPerTrip,
-                        label = 'Building the ' .. name,
+                        label = (leveling and 'Leveling the ground for the ' or 'Building the ') .. name,
                     }),
                 },
             }
@@ -642,7 +667,10 @@ function C.siteStatus(c, sid)
             if n and n > 0 then parts[#parts + 1] = n .. ' ' .. resName(res) end
         end
         if #parts > 0 then return 'Needs ' .. table.concat(parts, ', ') end
-        return string.format('Under construction (%d%%)', math.floor(100 * s.progress / math.max(1, d.work)))
+        if s.progress < (s.levelWork or 0) then
+            return string.format('Leveling the ground (%d%%)', math.floor(100 * s.progress / s.levelWork))
+        end
+        return string.format('Under construction (%d%%)', math.floor(100 * s.progress / math.max(1, siteWork(s))))
     end
     if d.job then
         local n = #C.assignedTo(c, sid)

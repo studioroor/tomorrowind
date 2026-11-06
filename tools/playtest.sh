@@ -17,10 +17,10 @@ window mode = 2
 [Sound]
 master volume = 0
 CFG
-OPENMW="${OPENMW:-/Applications/OpenMW.app/Contents/MacOS/openmw}"
+OPENMW="${OPENMW:-/Applications/OpenMW 0.52 RC1/OpenMW.app/Contents/MacOS/openmw}"
 # load the mod unless the user's own config already does
-MOD_ARGS=(--data "$ROOT" --content Tomorrowind.esp --content Tomorrowind.omwscripts)
-if grep -q '^content=Tomorrowind.esp' "$HOME/Library/Preferences/openmw/openmw.cfg" 2>/dev/null; then
+MOD_ARGS=(--data "$ROOT" --content Tomorrowind.omwscripts)
+if grep -q "^content=Tomorrowind.omwscripts" "$HOME/Library/Preferences/openmw/openmw.cfg" 2>/dev/null; then
   MOD_ARGS=()
 fi
 "$OPENMW" --config "$OUT/cfg" --user-data "$OUT/userdata" \

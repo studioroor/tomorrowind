@@ -1,7 +1,7 @@
 -- Minimal test runner: luajit tests/run.lua  (from the repo root)
 package.path = './?.lua;./?/init.lua;' .. package.path
 
-local files = { 'tests.test_colony' }
+local files = { 'tests.test_colony', 'tests.test_terrain' }
 local passed, failed = 0, 0
 
 _G.test = function(name, fn)

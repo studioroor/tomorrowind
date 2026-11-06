@@ -9,10 +9,9 @@ local I = require('openmw.interfaces')
 
 local C = require('scripts.tomorrowind.core.colony')
 local defs = require('scripts.tomorrowind.defs')
+local records = require('scripts.tomorrowind.records')
 
 local WORKER_SCRIPT = 'scripts/tomorrowind/worker.lua'
-local WORKER_POOL = {}
-for i = 1, 12 do WORKER_POOL[i] = string.format('tmw_worker_%02d', i) end
 
 local STATE_INTERVAL = 0.5
 local ACTIVE_INTERVAL = 0.5
@@ -22,7 +21,7 @@ local STEP_WATCHDOG = 150
 local c                      -- colony state (plain table, see core/colony.lua)
 local objs = { sites = {}, workers = {}, decor = {} }
 local ghost                  -- { obj=, kind= } while the player is placing
-local poolIndex = 0
+local recIds                 -- ids of our runtime records (see records.lua)
 
 -- runtime only
 local tokens = {}            -- wid -> token of the step in flight
@@ -36,6 +35,11 @@ local siteByObj = {}         -- object id -> sid
 
 local function log(...)
     print('[Tomorrowind]', ...)
+end
+
+local function rec()
+    recIds = records.ensure(recIds)
+    return recIds
 end
 
 local function v3(p) return util.vector3(p.x, p.y, p.z or 0) end
@@ -75,9 +79,9 @@ local function siteRadius(sid)
     return s and defs.buildings[s.kind].footprint or 150
 end
 
-local function placeObject(recordId, pos, yaw)
+local function placeObject(recordId, pos, yaw, onGround)
     local o = world.createObject(recordId)
-    o:teleport('', v3(pos), { rotation = util.transform.rotateZ(yaw or 0), onGround = true })
+    o:teleport('', v3(pos), { rotation = util.transform.rotateZ(yaw or 0), onGround = onGround ~= false })
     return o
 end
 
@@ -88,23 +92,48 @@ local function removeDecor(sid)
     objs.decor[sid] = nil
 end
 
+-- Timber pilings around the footprint wherever the ground drops away
+-- below a leveled building's floor.
+local function spawnPilings(sid, list)
+    local s = c.sites[sid]
+    if not s.leveled then return end
+    -- a freshly created object has no cell until next frame; any loaded
+    -- exterior cell in the same worldspace works for height lookups
+    local store = objs.sites[c.storehouse]
+    local cell = (store and store:isValid() and store.cell) or (player() and player().cell)
+    local r = siteRadius(sid) * 0.85
+    local count = math.max(8, math.floor(2 * math.pi * r / 160))
+    for i = 0, count - 1 do
+        local a = i * 2 * math.pi / count
+        local p = v3(s.pos) + util.vector3(math.sin(a) * r, math.cos(a) * r, 0)
+        local ok, ground = pcall(core.land.getHeightAt, p, cell)
+        if ok and ground and s.pos.z - ground > defs.slope.hiddenDepth then
+            local o = world.createObject(rec().decor.piling)
+            -- the piling mesh is centred on its origin: top at floor level
+            o:teleport('', util.vector3(p.x, p.y, s.pos.z - defs.slope.pilingHalfHeight), { rotation = util.transform.rotateZ(a) })
+            list[#list + 1] = o
+        end
+    end
+end
+
 local function spawnDecor(sid)
     local s = c.sites[sid]
     local d = defs.buildings[s.kind]
-    if d.decor ~= 'farm' then return end
     local list = {}
+    spawnPilings(sid, list)
+    objs.decor[sid] = list
+    if d.decor ~= 'farm' then return end
     local rot = util.transform.rotateZ(s.yaw)
     for ix = -2, 2 do
         for iy = -2, 2 do
             if not (ix == 0 and iy == 0) then
                 local off = rot * util.vector3(ix * 110, iy * 110, 0)
-                local o = world.createObject('tmw_decor_saltrice')
+                local o = world.createObject(rec().decor.saltrice)
                 o:teleport('', v3(s.pos) + off, { rotation = util.transform.rotateZ(math.random() * 6.28), onGround = true })
                 list[#list + 1] = o
             end
         end
     end
-    objs.decor[sid] = list
 end
 
 local function setSiteObject(sid)
@@ -112,8 +141,8 @@ local function setSiteObject(sid)
     local old = objs.sites[sid]
     if old and old:isValid() then old:remove() end
     local d = defs.buildings[s.kind]
-    local rec = s.built and d.acti or defs.constructionActi
-    objs.sites[sid] = placeObject(rec, s.pos, s.yaw)
+    local recordId = s.built and rec().buildings[s.kind] or rec().construction
+    objs.sites[sid] = placeObject(recordId, s.pos, s.yaw, not s.leveled)
     if s.built then spawnDecor(sid) end
     rebuildIndex()
 end
@@ -146,6 +175,7 @@ local function sendStep(wid, moveTo)
     local msg = {}
     for k, v in pairs(st) do msg[k] = v end
     msg.token = tokenCounter
+    if st.tool then msg.tool = rec().tools[st.tool] end
 
     local sid = st.to or st.at or c.storehouse
     local s = c.sites[sid]
@@ -179,24 +209,22 @@ end
 local function spawnWorker()
     local store = c.sites[c.storehouse]
     if not store then return end
-    poolIndex = poolIndex % #WORKER_POOL + 1
-    local recordId = WORKER_POOL[poolIndex]
-    local rec = types.NPC.record(recordId)
-    if not rec then
-        log('missing worker record', recordId, '- is Tomorrowind.esp enabled?')
-        return
-    end
-    local w = C.addWorker(c, { name = rec.name, recordId = recordId })
+    local recordId, name = records.newSettler()
+    local w = C.addWorker(c, { name = name, recordId = recordId })
     local a = math.random() * 2 * math.pi
     local r = siteRadius(c.storehouse) + 250
     local pos = v3(store.pos) + util.vector3(math.sin(a) * r, math.cos(a) * r, 50)
     local o = world.createObject(recordId)
     o:teleport('', pos, { onGround = true })
+    -- every settler carries the full tool set
+    for _, toolId in pairs(rec().tools) do
+        world.createObject(toolId):moveInto(types.Actor.inventory(o))
+    end
     o:addScript(WORKER_SCRIPT, { wid = w.id })
     objs.workers[w.id] = o
     rebuildIndex()
-    message(rec.name .. ' has joined the colony.')
-    log('worker joined', w.id, rec.name)
+    message(name .. ' has joined the colony.')
+    log('worker joined', w.id, name)
 end
 
 ---------------------------------------------------------------------------
@@ -418,7 +446,7 @@ local function beginPlace(e)
     if not d then return end
     removeGhost()
     local p = player()
-    local o = world.createObject(d.acti)
+    local o = world.createObject(rec().buildings[e.kind])
     o:teleport(p.cell, p.position + util.vector3(0, 0, -5000))
     ghost = { obj = o, kind = e.kind }
     p:sendEvent('TMW_Ghost', { obj = o, kind = e.kind })
@@ -443,7 +471,8 @@ local function placeConfirm(e)
     if not c or not ghost then return end
     local kind = ghost.kind
     removeGhost()
-    C.addSite(c, kind, plain(e.pos), e.yaw or 0, false)
+    local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, false, { foundation = e.foundation })
+    s.leveled = true -- e.pos.z is the computed floor level
     processEvents()
     message(defs.buildings[kind].name .. ' site placed.')
     pushState()
@@ -470,6 +499,24 @@ local function debugCommand(e)
         local p = player()
         local dir = e.lookAt - e.pos
         p:teleport('', e.pos, { rotation = util.transform.rotateZ(math.atan2(dir.x, dir.y)), onGround = true })
+    elseif e.cmd == 'finish' and c then
+        for _, sid in ipairs(c.siteOrder) do C.finishSite(c, sid) end
+        processEvents()
+    elseif e.cmd == 'pilings' and c then
+        for sid, list in pairs(objs.decor) do
+            local s = c.sites[sid]
+            for _, o in ipairs(list) do
+                if o:isValid() and o.recordId == rec().decor.piling then
+                    local ok, box = pcall(o.getBoundingBox, o)
+                    log(string.format('piling at site %s floor=%.0f origin=%.0f box z=[%.0f,%.0f]', sid, s.pos.z, o.position.z,
+                        ok and box.center.z - box.halfSize.z or -1, ok and box.center.z + box.halfSize.z or -1))
+                    break
+                end
+            end
+            if s and s.leveled then
+                log(string.format('leveled site %s %s floor=%.0f wood=%s work=%s', sid, s.kind, s.pos.z, tostring(s.cost.wood), tostring(s.levelWork)))
+            end
+        end
     elseif e.cmd == 'dump' then
         log('state', c and C.population(c), c and c.stock.food)
     end
@@ -500,14 +547,14 @@ return {
     engineHandlers = {
         onUpdate = onUpdate,
         onSave = function()
-            return { colony = c, objs = objs, poolIndex = poolIndex, ghost = ghost }
+            return { colony = c, objs = objs, recIds = recIds, ghost = ghost }
         end,
         onLoad = function(data)
             data = data or {}
             c = data.colony
             objs = data.objs or { sites = {}, workers = {}, decor = {} }
             objs.decor = objs.decor or {}
-            poolIndex = data.poolIndex or 0
+            recIds = data.recIds
             ghost = data.ghost
             removeGhost() -- placement does not survive a reload
             tokens = {}

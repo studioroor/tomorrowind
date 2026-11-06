@@ -7,6 +7,7 @@ local util = require('openmw.util')
 local self = require('openmw.self')
 local nearby = require('openmw.nearby')
 local types = require('openmw.types')
+local terrain = require('scripts.tomorrowind.core.terrain')
 
 local DURATION = tonumber(os and os.getenv and os.getenv('TMW_TEST_SECONDS')) or 150
 local t = 0
@@ -51,6 +52,7 @@ local function summary()
 end
 
 local nextSummary = 5
+local placeTarget
 
 return {
     engineHandlers = {
@@ -127,13 +129,60 @@ return {
             once('ledger_build', 103, function() self:sendEvent('TMW_DebugLedger', { open = true, tab = 'build' }) end)
             once('ledger_close', 107, function() self:sendEvent('TMW_DebugLedger', { open = false }) end)
             once('place_view', 108, function()
-                core.sendGlobalEvent('TMW_Debug', { cmd = 'tp', pos = offset(0, 900), lookAt = offset(0, 2000) })
+                -- find a moderately sloped spot (needs a foundation, not too
+                -- steep) for the house, away from existing buildings
+                local r = 570 -- the Hlaalu House footprint
+                local function h(x, y)
+                    local ok, z = pcall(core.land.getHeightAt, util.vector3(x, y, 0), self.cell)
+                    return ok and z or nil
+                end
+                local best
+                for gx = -8, 8 do
+                    for gy = -8, 8 do
+                        local p = offset(gx * 250, gy * 250)
+                        local far = true
+                        for _, site in ipairs(snap.sites) do
+                            if (util.vector2(p.x - site.pos.x, p.y - site.pos.y)):length() < r + site.radius + 200 then far = false end
+                        end
+                        if far then
+                            local hs = {}
+                            for _, d in ipairs(terrain.samplePoints(r)) do hs[#hs + 1] = h(p.x + d[1], p.y + d[2]) end
+                            local a = terrain.analyze(hs)
+                            if a.ok and a.depth > 40 and (not best or a.depth > best.a.depth) then
+                                best = { p = util.vector3(p.x, p.y, a.level), a = a }
+                            end
+                        end
+                    end
+                end
+                if not best then return log('no sloped spot found') end
+                log(string.format('sloped spot depth=%.0f wood=%d work=%d', best.a.depth, best.a.wood, best.a.work))
+                placeTarget = best.p
+                local back = util.vector3(best.p.x, best.p.y - 1300, best.p.z)
+                core.sendGlobalEvent('TMW_Debug', { cmd = 'tp', pos = back, lookAt = best.p })
             end)
             once('place_start', 109.5, function()
-                camera.setPitch(0.45)
-                self:sendEvent('TMW_DebugPlace', { kind = 'house' })
+                if placeTarget then
+                    local cam = camera.getPosition()
+                    local horiz = util.vector2(placeTarget.x - cam.x, placeTarget.y - cam.y):length()
+                    camera.setPitch(math.atan2(cam.z - placeTarget.z, horiz))
+                else
+                    camera.setPitch(0.45)
+                end
+                self:sendEvent('TMW_DebugPlace', { kind = 'house', at = placeTarget })
             end)
             once('place_confirm', 116, function() self:sendEvent('TMW_DebugPlace', { confirm = true }) end)
+            once('finish_all', 122, function() core.sendGlobalEvent('TMW_Debug', { cmd = 'finish' }) end)
+            once('pilings', 126, function() core.sendGlobalEvent('TMW_Debug', { cmd = 'pilings' }) end)
+            once('view_house', 128, function()
+                if not placeTarget then return end
+                core.sendGlobalEvent('TMW_Debug', { cmd = 'tp', pos = util.vector3(placeTarget.x - 900, placeTarget.y - 1500, placeTarget.z), lookAt = placeTarget })
+            end)
+            once('view_pitch', 129, function()
+                if not placeTarget then return end
+                local cam = camera.getPosition()
+                local horiz = util.vector2(placeTarget.x - cam.x, placeTarget.y - cam.y):length()
+                camera.setPitch(math.atan2(cam.z - (placeTarget.z - 150), horiz))
+            end)
             if t >= nextSummary then
                 nextSummary = nextSummary + 10
                 summary()

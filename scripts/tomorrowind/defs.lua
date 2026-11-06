@@ -36,6 +36,19 @@ defs.arrival = {
 
 defs.buildWorkPerTrip = 10    -- seconds of building per builder visit
 
+-- Building on slopes. The floor level sits `levelAt` of the way from the
+-- lowest to the highest ground under the footprint: the uphill side sinks
+-- into the slope, the downhill side rests on timber pilings.
+defs.slope = {
+    levelAt = 0.4,
+    hiddenDepth = 40,        -- gap a building's own mesh hides
+    maxBurial = 220,         -- minimum allowed sinking into a slope...
+    burialPerHeight = 0.35,  -- ...or this fraction of the building's height
+    woodPerUnit = 1 / 20,    -- foundation timber per unit of gap
+    workPerUnit = 1 / 4,     -- extra builder seconds per unit of gap
+    pilingHalfHeight = 290,  -- ex_de_docks_piling.nif is centred, 580 tall (measured in game)
+}
+
 -- Buildings.
 --   cost:   materials delivered by haulers before building can start
 --   work:   seconds of builder work to finish once materials are in
@@ -44,38 +57,42 @@ defs.buildWorkPerTrip = 10    -- seconds of building per builder visit
 --   tool/anim: what workers swing while working there
 defs.buildings = {
     storehouse = {
-        name = 'Storehouse', acti = 'tmw_storehouse', cost = {}, work = 0, beds = 4,
+        name = 'Storehouse', model = 'meshes/x/ex_de_shack_02.nif', cost = {}, work = 0, beds = 4,
         founding = true, footprint = 350,
     },
     lumber = {
-        name = "Woodcutter's Camp", acti = 'tmw_lumber', cost = {}, work = 10,
+        name = "Woodcutter's Camp", model = 'meshes/f/furn_log_01.nif', cost = {}, work = 10,
         job = 'Woodcutter', slots = 3, cycle = 10, output = { wood = 2 },
-        tool = 'tmw_tool_axe', footprint = 200,
+        tool = 'axe', footprint = 200,
     },
     farm = {
-        name = 'Saltrice Paddy', acti = 'tmw_farm', cost = { wood = 6 }, work = 15,
+        name = 'Saltrice Paddy', model = 'meshes/o/flora_saltrice_02.nif', cost = { wood = 6 }, work = 15,
         job = 'Farmer', slots = 3, cycle = 16, output = { food = 2 },
-        tool = 'tmw_tool_hoe', footprint = 300,
+        tool = 'hoe', footprint = 300,
         decor = 'farm',
     },
     mine = {
-        name = 'Ore Vein', acti = 'tmw_mine', cost = { wood = 10 }, work = 20,
+        name = 'Ore Vein', model = 'meshes/o/contain_rock_ebony_01.nif', cost = { wood = 10 }, work = 20,
         job = 'Miner', slots = 3, cycle = 12, output = { ore = 2 },
-        tool = 'tmw_tool_pick', footprint = 200,
+        tool = 'pick', footprint = 200,
     },
     smelter = {
-        name = 'Smelter', acti = 'tmw_smelter', cost = { wood = 10, ore = 6 }, work = 30,
+        name = 'Smelter', model = 'meshes/f/furn_de_forge_01.nif', cost = { wood = 10, ore = 6 }, work = 30,
         job = 'Smelter', slots = 2, cycle = 14, input = { ore = 2 }, output = { ingot = 1 },
-        tool = 'tmw_tool_hammer', footprint = 200,
+        tool = 'hammer', footprint = 200,
     },
     house = {
-        name = 'Hlaalu House', acti = 'tmw_house', cost = { wood = 20, ingot = 4 }, work = 40,
+        name = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_01.nif', cost = { wood = 20, ingot = 4 }, work = 40,
         beds = 4, footprint = 700,
     },
 }
 defs.buildOrder = { 'lumber', 'farm', 'mine', 'smelter', 'house' }
 
-defs.builderTool = 'tmw_tool_hammer'
-defs.constructionActi = 'tmw_construction'
+defs.builderTool = 'hammer'
+defs.constructionModel = 'meshes/x/ex_de_scaffold_01.nif'
+defs.decorModels = {
+    saltrice = 'meshes/o/flora_saltrice_01.nif',
+    piling = 'meshes/x/ex_de_docks_piling.nif',
+}
 
 return defs

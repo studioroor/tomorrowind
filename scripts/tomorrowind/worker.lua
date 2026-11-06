@@ -281,9 +281,23 @@ local function onUpdate(dt)
     if h.update(s, dt) and cur == s then finish() end
 end
 
+-- Settlers don't greet (greeting turns them toward the player, away from
+-- their work) and never start fights.
+local function calm()
+    local ai = Actor.stats.ai
+    pcall(function()
+        ai.hello(self).base = 0
+        ai.fight(self).base = 0
+        ai.alarm(self).base = 0
+    end)
+end
+
 return {
     engineHandlers = {
-        onInit = function(data) wid = data and data.wid end,
+        onInit = function(data)
+            wid = data and data.wid
+            calm()
+        end,
         onSave = function() return { wid = wid } end,
         onLoad = function(data) wid = data and data.wid end,
         onUpdate = onUpdate,
