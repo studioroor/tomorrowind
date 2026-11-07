@@ -14,6 +14,7 @@ local I = require('openmw.interfaces')
 local types = require('openmw.types')
 
 local defs = require('scripts.tomorrowind.defs')
+local C = require('scripts.tomorrowind.core.colony')
 local terrain = require('scripts.tomorrowind.core.terrain')
 
 local T = I.MWUI.templates
@@ -79,6 +80,7 @@ end
 -- ledger
 
 local closeLedger -- forward
+local startMoving -- forward
 
 local function send(name, data) core.sendGlobalEvent(name, data or {}) end
 
@@ -128,7 +130,11 @@ local function overviewTab()
             text(s.name, 190, s.id == focusSite),
             text(s.status, 300),
         }
-        if s.kind ~= 'storehouse' then
+        if s.canMove then
+            r[#r + 1] = button('Move', function() startMoving(s) end)
+            r[#r + 1] = gap(4, 1)
+        end
+        if s.kind ~= 'storehouse' and s.kind ~= 'salvage' then
             r[#r + 1] = button(s.built and 'Demolish' or 'Cancel', function()
                 send('TMW_RemoveSite', { sid = s.id })
             end)
@@ -144,13 +150,7 @@ local function overviewTab()
 end
 
 local function cycleAssignment(w, dir)
-    local opts = snap.options
-    local idx = 1
-    for i, o in ipairs(opts) do
-        if o.id == w.assignment then idx = i end
-    end
-    local nxt = opts[(idx - 1 + dir) % #opts + 1]
-    send('TMW_Assign', { wid = w.id, target = nxt.id })
+    send('TMW_CycleJob', { wid = w.id, dir = dir })
 end
 
 local function workersTab()
@@ -200,7 +200,7 @@ local function buildTab()
     for _, kind in ipairs(defs.buildOrder) do
         local d = defs.buildings[kind]
         local provides = d.job and string.format('%d %s jobs', d.slots, d.job)
-            or (d.beds and (d.beds .. ' beds') or '')
+            or (d.door and 'A room to furnish, with a bed') or (d.beds and (d.beds .. ' beds') or '')
         if d.output then
             local res, n = next(d.output)
             provides = provides .. ', ' .. n .. ' ' .. resLabel(res)
@@ -390,10 +390,18 @@ startPlacing = function(kind)
     send('TMW_BeginPlace', { kind = kind, variant = 1 })
 end
 
+-- Moving a building: place it again, as it is.
+startMoving = function(site)
+    startPlacing(site.kind)
+    placing.moving, placing.from, placing.variant = site.id, site, site.variant or 1
+    placing.yaw = site.yaw
+    send('TMW_BeginPlace', { kind = site.kind, variant = placing.variant, moving = site.id })
+end
+
 -- Next or previous model for what's being placed (a new preview object).
 local function cycleVariant(dir)
     local count = #(defs.buildings[placing.kind].variants or {})
-    if count < 2 then return end
+    if count < 2 or placing.moving then return end
     placing.variant = (placing.variant - 1 + dir) % count + 1
     placing.obj = nil
     send('TMW_BeginPlace', { kind = placing.kind, variant = placing.variant })
@@ -411,6 +419,7 @@ local function stopPlacing(confirm)
         end
         local a = placing.analysis
         send('TMW_PlaceConfirm', {
+            moving = placing.moving,
             pos = placing.pos, yaw = placing.yaw, radius = placing.radius,
             foundation = { wood = a.wood, work = a.work, depth = a.depth },
         })
@@ -488,6 +497,7 @@ local function obstruction(pos, r, top, bottom)
                 end
             end
         end
+        if o and placing.from and placing.from.obj and o.id == placing.from.obj.id then hollow = true end -- itself, where it stands now
         if o and not hollow and not (placing.obj and o.id == placing.obj.id) and o.type ~= types.NPC and o.type ~= types.Creature then
             local okName, rec = pcall(function() return o.type.record(o) end)
             local name = okName and rec and rec.name
@@ -501,6 +511,7 @@ end
 -- the obstruction rays, so a lantern can stand right next to a wall.
 local function tooClose(d, pos, r, s)
     local other = defs.buildings[s.kind]
+    if s.id == placing.moving or (placing.moving and s.kind == 'salvage') then return false end
     if s.host ~= snap.insideHost then return false end -- another place entirely
     if snap.insideHost then return dist2d(pos, s.pos) < (s.radius + r) * 0.6 end
     if d.small then
@@ -627,9 +638,17 @@ local function updatePlacing(dt)
                 tostring(placing.analysis and placing.analysis.depth)))
         end
     end
-    local variants = defs.buildings[placing.kind].variants
+    local variants = not placing.moving and defs.buildings[placing.kind].variants
+    local title = 'Placing: ' .. d.name .. '   (' .. costText(d.cost) .. ')'
+    if placing.moving and placing.pos then
+        local f = placing.from
+        local a = placing.analysis
+        local cost, work = C.moveCost(placing.kind, { x = f.pos.x, y = f.pos.y, yaw = f.yaw },
+            { x = placing.pos.x, y = placing.pos.y, yaw = placing.yaw }, a and a.ok and { wood = a.wood, work = a.work } or nil)
+        title = string.format('Moving: %s   (%s, %ds of work)', d.label or d.name, costText(cost), work)
+    end
     local lines = {
-        text('Placing: ' .. d.name .. '   (' .. costText(d.cost) .. ')', nil, true),
+        text(title, nil, true),
         text((placing.snapped and 'Z / X bend' or 'Z / X rotate') .. '     Up / Down height     Enter place     Backspace cancel'),
     }
     if variants then
@@ -657,6 +676,7 @@ local debugOn = defs.debug
 local quietUi = false        -- no labels or panels (filming)
 local hoverSite              -- the furnishing being looked at (has its own panel)
 local hoverWorker            -- the settler being looked at
+local hoverMove              -- the building being looked at, if it can be moved
 local bubbles = {}           -- list of { obj=, text=, until= }
 
 local function clearLabels()
@@ -763,7 +783,7 @@ local hoverText
 
 local function clearHover()
     if hoverEl then hoverEl:destroy() hoverEl = nil end
-    hoverSite, hoverWorker, hoverText = nil, nil, nil
+    hoverSite, hoverWorker, hoverMove, hoverText = nil, nil, nil, nil
 end
 
 -- The colony board: the ledger's overview and workers, to read.
@@ -828,6 +848,9 @@ local function hoverLines(id, dist)
             if s.small then
                 hoverSite = s.id
                 lines[#lines + 1] = s.built and 'Delete: remove' or 'Delete: cancel'
+            elseif s.canMove then
+                hoverMove = s
+                lines[#lines + 1] = 'M: move'
             end
             return lines
         end
@@ -842,7 +865,7 @@ local function updateHover(dt)
     local from = camera.getPosition()
     local to = from + camera.viewportToWorldVector(v2(0.5, 0.5)) * HOVER_RANGE
     local res = nearby.castRenderingRay(from, to, { ignore = self.object })
-    hoverSite, hoverWorker = nil, nil
+    hoverSite, hoverWorker, hoverMove = nil, nil, nil
     local dist = res.hit and (res.hitPos - from):length() or 0
     local lines = res.hit and res.hitObject and hoverLines(res.hitObject.id, dist)
     if not lines then return clearHover() end
@@ -886,6 +909,12 @@ return {
                 elseif key.code == input.KEY.LeftArrow then
                     cycleVariant(-1)
                 end
+                return
+            end
+            if key.code == input.KEY.M and hoverMove and not I.UI.getMode() then
+                local site = hoverMove
+                clearHover()
+                startMoving(site)
                 return
             end
             if key.code == input.KEY.Delete and hoverSite and not I.UI.getMode() then
@@ -949,7 +978,13 @@ return {
             if e.open then openLedger(e.tab) else closeLedger() end
         end,
         TMW_DebugPlace = function(e)
-            if e.kind then
+            if e.move then
+                for _, s in ipairs(snap.sites) do
+                    if s.kind == e.move and s.canMove then startMoving(s) break end
+                end
+                placing.forcedAim = e.at
+                if e.yaw then placing.yaw = e.yaw end
+            elseif e.kind then
                 startPlacing(e.kind)
                 placing.forcedAim = e.at
                 if e.curve then placing.curve = e.curve end

@@ -9,7 +9,7 @@ local defs = {}
 defs.debug = false
 
 defs.resources = {
-    food  = { name = 'Saltrice' },
+    food  = { name = 'Food' },
     wood  = { name = 'Timber' },
     ore   = { name = 'Raw Ore' },
     ingot = { name = 'Iron Ingot' },
@@ -23,11 +23,11 @@ defs.carryAmount = 5          -- max units a hauler carries per trip
 defs.walkSpeed = 110          -- units/s, used to estimate trips when off-screen
 
 defs.hunger = {
-    decayPerHour = 1 / 6,     -- fully fed -> empty in 6 game hours
+    decayPerHour = 1 / 12,    -- fully fed -> empty in 12 waking game hours: about 3 meals a day
     eatBelow = 0.5,           -- go eat when fed drops below this
     hungryBelow = 0.25,       -- below this: works at reduced speed
     hungrySpeed = 0.5,
-    mealFood = 2,             -- Saltrice per meal
+    mealFood = 3,             -- Food per meal
     mealBelow = 0.8,          -- in free time, have a meal below this
     asleepFactor = 0.25,      -- hunger grows this much slower while asleep
     mealHours = 0.25,         -- how long a meal by the campfire takes
@@ -87,6 +87,7 @@ defs.utter = {
         stroll = { 'A little walk will do me good.', 'Fine day for it.' },
         indoors = { 'I think I will put my feet up.', 'Time for a little rest inside.' },
         gather = { 'I may as well lend a hand.' },
+        salvage = { 'Waste not, want not.', 'Plenty of good timber in this lot.' },
         trade = { 'Fresh goods, good prices!', 'Let us see what this fetches.', 'Everything has its price.' },
         ['Resting by the campfire'] = { 'A warm fire is all I need.', 'Is there room by the fire?' },
         ['Reading a book'] = { 'Now, where was I?', 'I must finish that chapter.' },
@@ -160,6 +161,19 @@ defs.arrival = {
 }
 
 defs.buildWorkPerTrip = 10    -- seconds of building per builder visit
+
+-- Demolishing a building leaves this share of what it cost in a pile on the
+-- spot (cancelling one leaves what was delivered); settlers carry it back.
+-- Furnishings give everything back at once.
+defs.salvage = { share = 0.5 }
+
+-- Moving a finished building: a share of what it cost, plus timber and work
+-- for every unit of distance and degree of turn (and a foundation if the new
+-- spot needs one).
+defs.move = {
+    share = 0.15, perUnit = 1 / 150, perDegree = 1 / 15, minWood = 2,
+    workShare = 0.3, workPerUnit = 1 / 40, workPerDegree = 1 / 6,
+}
 defs.awaySummaryAfter = 30    -- seconds away before coming back shows a summary
 
 -- Building on slopes. The floor level sits `levelAt` of the way from the
@@ -208,10 +222,19 @@ defs.buildings = {
         sound = { id = 'Light Armor Hit', pitch = { 0.6, 0.75 }, volume = 0.9 },
     },
     farm = {
-        name = 'Saltrice Paddy', model = 'meshes/o/flora_saltrice_02.nif', cost = { wood = 10 }, work = 15,
+        -- what grows on it is a matter of taste: all of it is food
+        name = 'Farm', model = 'meshes/o/flora_saltrice_02.nif', cost = { wood = 10 }, work = 15,
         job = 'Farmer', slots = 3, cycle = 30, output = { food = 2 }, maxBuilders = 4,
         tool = 'hoe', footprint = 300,
         decor = 'farm',
+        variants = {
+            { label = 'Saltrice Paddy', crop = 'saltrice' },
+            { label = 'Wickwheat Field', model = 'meshes/o/flora_wickwheat_01.nif', crop = 'wickwheat' },
+            { label = 'Marshmerrow Patch', model = 'meshes/o/flora_marshmerrow_01.nif', crop = 'marshmerrow' },
+            { label = 'Ash Yam Field', model = 'meshes/o/flora_ash_yam_01.nif', crop = 'ashyam', scale = 1.8, cropScale = 1.8 },
+            { label = 'Hackle-lo Field', model = 'meshes/o/flora_hackle-lo_01.nif', crop = 'hacklelo', scale = 0.55, cropScale = 0.55 },
+            { label = 'Kwama Nest', model = 'meshes/o/contain_egg_kwama00.nif', crop = 'kwamaegg' },
+        },
         sound = { id = 'Body Fall Small', pitch = { 1.2, 1.5 }, volume = 0.6 },
     },
     mine = {
@@ -242,8 +265,10 @@ defs.buildings = {
     },
     house = {
         -- Hlaalu models: the door sills sit about 70 below the origin, on a solid
-        -- plinth that goes into the ground (and shows on the downhill side)
-        name = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_01.nif', cost = { wood = 40, ingot = 8 }, work = 60,
+        -- plinth that goes into the ground (and shows on the downhill side).
+        -- With a door, its beds are the ones in its room: it comes with the bed
+        -- the vanilla house had. Without one, `beds` counts.
+        name = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_01.nif', cost = { wood = 25, ingot = 4 }, work = 60,
         beds = 4, footprint = 700, lift = 80,
         door = hlaaluDoor(14, -4, -17, 92, 'hlaalu_mid'),
         variants = {
@@ -272,6 +297,16 @@ defs.buildings = {
             { decor = 'crate', offset = { 130, -10, 32 }, turn = 0.2 },
             { decor = 'orepile', offset = { 135, 70, -15 }, scale = 0.6 },
         },
+    },
+    -- a building on its way to a new spot (cost and work are worked out per move)
+    move = {
+        name = 'Move', model = 'meshes/x/ex_de_scaffold_01.nif', cost = {}, work = 0,
+        footprint = 200, moves = true, maxBuilders = 6,
+    },
+    -- what's left of a demolished building, until it's carried away
+    salvage = {
+        name = 'Salvage', model = 'meshes/f/furn_crate_open_01.nif', lift = 29,
+        cost = {}, work = 0, footprint = 60, salvage = true,
     },
     warehouse = {
         name = 'Warehouse', model = 'meshes/x/ex_de_shack_04.nif', cost = { wood = 30 }, work = 25,
@@ -426,6 +461,11 @@ defs.furnishOrder = {
             { label = 'Plain bed', model = 'meshes/f/furn_com_bed_02.nif', lift = 31 },
             { label = 'Rough bed', model = 'meshes/f/furn_com_bed_03.nif', lift = 29 },
             { label = 'Canopy bed', model = 'meshes/f/furn_com_bed_01.nif', lift = 86 },
+            -- the beds of the vanilla houses the rooms are copied from
+            { label = 'Hlaalu bed', model = 'meshes/f/active_de_bed_11.nif', lift = 32 },
+            { label = 'Wide Hlaalu bed', model = 'meshes/f/active_de_bed_16.nif', lift = 33 },
+            { label = 'Long Hlaalu bed', model = 'meshes/f/active_de_bed_28.nif', lift = 41 },
+            { label = 'Common bed', model = 'meshes/f/furn_com_bed_05.nif', lift = 29 },
         } }),
     -- scaled up so its door is wide enough for the navmesh (routes go through
     -- it): meshes come from tools/make_tent_meshes.py
@@ -516,6 +556,11 @@ defs.constructionModel = 'meshes/x/ex_de_scaffold_01.nif'
 defs.scaffoldRadius = 163    -- ex_de_scaffold_01.nif half width; scaled up for big buildings
 defs.decorModels = {
     saltrice = 'meshes/o/flora_saltrice_01.nif',
+    wickwheat = 'meshes/o/flora_wickwheat_02.nif',
+    marshmerrow = 'meshes/o/flora_marshmerrow_02.nif',
+    ashyam = 'meshes/o/flora_ash_yam_02.nif',
+    hacklelo = 'meshes/o/flora_hackle-lo_02.nif',
+    kwamaegg = 'meshes/o/contain_egg_kwama00.nif',
     fence = 'meshes/x/furn_com_fence_01.nif',
     piling = 'meshes/x/ex_de_docks_piling.nif',
     log = 'meshes/f/furn_log_01.nif',             -- 54 long; used at double size
@@ -539,6 +584,9 @@ defs.smallConstructionLift = 29
 -- used up as the building goes up. `per` units per object, at most `max`.
 -- Rooms of different houses are this far apart inside the interior cell.
 defs.roomSpacing = 15000
+
+-- Who you find in a house when you're inside, by the chance per game hour.
+defs.rooms = { visitChance = 0.35, loungeChance = 0.12, maxPeople = 6 }
 
 defs.piles = {
     wood = { model = 'log', per = 2, max = 30, layout = 'logs' },

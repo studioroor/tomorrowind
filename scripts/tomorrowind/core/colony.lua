@@ -49,6 +49,14 @@ local function def(site) return defs.buildings[site.kind] end
 
 local function resName(res) return defs.resources[res].name end
 
+-- A site's name in task labels: a move is named after what it moves.
+local function nameOf(c, s)
+    local target = s.target and c.sites[s.target]
+    if target then return def(target).name end
+    return def(s).name
+end
+C.nameOf = nameOf
+
 ---------------------------------------------------------------------------
 -- the day
 
@@ -173,13 +181,47 @@ local function storageFull(c, res)
     return cap > 0 and (c.stock[res] or 0) >= cap
 end
 
+-- A building's own beds. A house you can enter has none of its own: its
+-- beds are the ones standing in its room (sites hosted by it).
+local function ownBeds(s)
+    if not s.host and defs.look(s.kind, s.variant).door then return 0 end
+    return def(s).beds or 0
+end
+C.ownBeds = ownBeds
+
 function C.beds(c)
     local n = 0
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
-        if s.built then n = n + (def(s).beds or 0) end
+        if s.built then n = n + ownBeds(s) end
     end
     return n
+end
+
+-- Beds standing in a house's room.
+local function bedsInside(c, house)
+    local n = 0
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.host == house and s.built then n = n + (def(s).beds or 0) end
+    end
+    return n
+end
+
+-- A house is built: it comes with the beds its room had in vanilla. `beds` is
+-- a list of { kind, variant, pos, yaw } in interior-cell coordinates. They
+-- cost nothing, so they give nothing back when removed.
+function C.furnishHouse(c, sid, beds)
+    local s = c.sites[sid]
+    if not s or s.furnished then return {} end
+    s.furnished = true
+    local added = {}
+    for _, b in ipairs(beds) do
+        local bed = C.addSite(c, b.kind, b.pos, b.yaw, true, { host = sid, variant = b.variant })
+        bed.free = true
+        added[#added + 1] = bed
+    end
+    return added
 end
 
 -- Free settlers (prisoners live in the stockade, not in beds).
@@ -244,7 +286,7 @@ function C.addSite(c, kind, pos, yaw, built, opts)
     local d = defs.buildings[kind]
     assert(d, 'unknown building ' .. tostring(kind))
     local foundation = opts and opts.foundation
-    local cost = copy(d.cost)
+    local cost = copy(opts and opts.cost or d.cost)
     if foundation and foundation.wood and foundation.wood > 0 then
         cost.wood = (cost.wood or 0) + foundation.wood
     end
@@ -253,11 +295,12 @@ function C.addSite(c, kind, pos, yaw, built, opts)
         kind = kind,
         variant = opts and opts.variant,
         host = opts and opts.host,     -- the house it stands in, for furniture indoors
+        target = opts and opts.target, -- for a move: the building being moved
         pos = { x = pos.x, y = pos.y, z = pos.z },
         yaw = yaw or 0,
         built = built and true or false,
         cost = cost,                 -- materials incl. foundation
-        work = d.work + (foundation and foundation.work or 0),
+        work = (opts and opts.work or d.work) + (foundation and foundation.work or 0),
         levelWork = foundation and foundation.work or 0,
         needs = built and {} or copy(cost),
         incoming = {},
@@ -305,9 +348,12 @@ C.materialsComplete = function(c, sid) return materialsComplete(c.sites[sid]) en
 
 local function siteWork(s) return s.work or def(s).work end
 
+local finishMove -- with the moves below
+
 local function finishBuilding(c, s)
     s.built = true
     s.progress = siteWork(s)
+    if def(s).moves then return finishMove(c, s) end
     emit(c, { kind = 'built', site = s.id })
     emit(c, { kind = 'msg', text = def(s).name .. ' is finished.' })
 end
@@ -337,21 +383,35 @@ end
 function C.removeSite(c, sid)
     local s = c.sites[sid]
     if not s or sid == c.storehouse then return false end
-    -- what stands inside goes with the house
+    -- what stands inside goes with the house, and so does a move under way
     for i = #c.siteOrder, 1, -1 do
         local other = c.sites[c.siteOrder[i]]
-        if other and other.host == sid then C.removeSite(c, other.id) end
+        if other and (other.host == sid or other.target == sid) then C.removeSite(c, other.id) end
+    end
+    if def(s).moves and not s.built then
+        local target = c.sites[s.target]
+        if target then
+            target.moving = nil
+            emit(c, { kind = 'move_cancelled', site = s.target })
+        end
     end
     for _, wid in ipairs(c.workerOrder) do
         local w = c.workers[wid]
         if w.task and w.task.site == sid then C.cancelTask(c, wid) end
         if w.assignment == sid then w.assignment = nil end
     end
-    -- furnishings can be rearranged freely: their materials always come back
-    if not s.built or def(s).small then
+    -- furnishings can be rearranged freely: their materials come straight back.
+    -- Anything else leaves a pile on the spot: what was delivered, or a share
+    -- of what a finished building cost.
+    local goods, any = {}, false
+    if not s.free and not def(s).salvage then
         for res, n in pairs(s.cost or def(s).cost) do
-            local delivered = n - (s.needs[res] or 0)
-            c.stock[res] = c.stock[res] + delivered
+            local amount = s.built and math.floor(n * defs.salvage.share) or (n - (s.needs[res] or 0))
+            if def(s).small then
+                c.stock[res] = c.stock[res] + (s.built and n or amount)
+            elseif amount > 0 then
+                goods[res], any = amount, true
+            end
         end
     end
     for _, wid in ipairs(c.workerOrder) do
@@ -362,6 +422,11 @@ function C.removeSite(c, sid)
         if id == sid then table.remove(c.siteOrder, i) break end
     end
     emit(c, { kind = 'site_removed', site = sid })
+    if any then
+        local pile = C.addSite(c, 'salvage', s.pos, s.yaw, true)
+        pile.goods, pile.claimed = goods, {}
+        emit(c, { kind = 'site_added', site = pile.id })
+    end
     return true
 end
 
@@ -396,11 +461,9 @@ function C.removeWorker(c, wid)
     end
 end
 
--- target: a built production site id, 'builder', or nil (laborer).
-function C.assign(c, wid, target)
-    local w = c.workers[wid]
-    if not w then return false, 'no such worker' end
-    if target == false then target = nil end
+-- Can this worker take this job? target: a built production site id,
+-- 'builder', or nil (laborer). Returns false and the reason if not.
+local function canAssign(c, w, target)
     if w.prisoner then
         if target == 'builder' then return false, 'prisoners cannot build' end
         local ps = target and c.sites[target]
@@ -418,6 +481,15 @@ function C.assign(c, wid, target)
             return false, d.name .. ' is full'
         end
     end
+    return true
+end
+
+function C.assign(c, wid, target)
+    local w = c.workers[wid]
+    if not w then return false, 'no such worker' end
+    if target == false then target = nil end
+    local ok, err = canAssign(c, w, target)
+    if not ok then return false, err end
     if w.assignment == target then return true end
     C.cancelTask(c, wid)
     w.assignment = target
@@ -434,6 +506,23 @@ function C.assignmentOptions(c)
         if s.built and def(s).job then opts[#opts + 1] = sid end
     end
     return opts
+end
+
+-- The next job this worker can actually take, going through the options in
+-- `dir` (+1 or -1) and skipping full ones. nil if there's no other job.
+function C.nextAssignment(c, wid, dir)
+    local w = c.workers[wid]
+    if not w then return nil end
+    local opts = C.assignmentOptions(c)
+    local at = 1
+    for i, o in ipairs(opts) do
+        if (o or nil) == w.assignment then at = i end
+    end
+    for step = 1, #opts - 1 do
+        local o = opts[(at - 1 + dir * step) % #opts + 1]
+        if canAssign(c, w, o or nil) then return o end
+    end
+    return nil
 end
 
 function C.assignmentLabel(c, target, prisoner)
@@ -659,9 +748,10 @@ local function bedFor(c, w)
     end
     local function free(sid)
         local s = c.sites[sid]
-        return s and s.built and def(s).beds and (used[sid] or 0) < def(s).beds
+        return s and s.built and (used[sid] or 0) < ownBeds(s)
     end
-    if w.bed and free(w.bed) then return c.sites[w.bed] end
+    -- they keep a real bed; from a spot in a building they move to one when they can
+    if w.bed and free(w.bed) and def(c.sites[w.bed]).sleepOn then return c.sites[w.bed] end
     for _, wantReal in ipairs({ true, false }) do
         for _, sid in ipairs(c.siteOrder) do
             if free(sid) and (def(c.sites[sid]).sleepOn or false) == wantReal then
@@ -884,7 +974,7 @@ local function haulTask(c)
                     local amount = math.min(left, avail, defs.carryAmount)
                     reserve(c, res, amount)
                     s.incoming[res] = (s.incoming[res] or 0) + amount
-                    local name = def(s).name
+                    local name = nameOf(c, s)
                     return {
                         kind = 'haul', site = sid, label = 'Hauling',
                         holds = { res = res, amount = amount },
@@ -906,7 +996,7 @@ local function buildTask(c, speed)
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
         if not s.built and materialsComplete(s) and hasRoom(c, s) then
-            local name = def(s).name
+            local name = nameOf(c, s)
             local leveling = s.progress < (s.levelWork or 0)
             return {
                 kind = 'build', site = sid, label = leveling and 'Leveling' or 'Building',
@@ -915,7 +1005,7 @@ local function buildTask(c, speed)
                     step('work', {
                         at = sid, duration = defs.buildWorkPerTrip / speed, tool = defs.builderTool,
                         effect = 'build', amount = defs.buildWorkPerTrip,
-                        label = (leveling and 'Leveling the ground for the ' or 'Building the ') .. name,
+                        label = (leveling and 'Leveling the ground for the ' or (s.target and 'Moving the ' or 'Building the ')) .. name,
                     }),
                 },
             }
@@ -960,9 +1050,9 @@ local function helperGather(c, p, speed, site, need)
         local n = math.min(amount, need)
         site.incoming[res] = (site.incoming[res] or 0) + n
         task.incoming = { site = site.id, res = res, amount = n }
-        task.label = 'Fetching ' .. resName(res) .. ' for the ' .. def(site).name
-        task.steps[#task.steps + 1] = step('goto', { to = site.id, label = 'Carrying ' .. resName(res) .. ' to the ' .. def(site).name .. ' site' })
-        task.steps[#task.steps + 1] = step('supply', { at = site.id, label = 'Unloading at the ' .. def(site).name .. ' site' })
+        task.label = 'Fetching ' .. resName(res) .. ' for the ' .. nameOf(c, site)
+        task.steps[#task.steps + 1] = step('goto', { to = site.id, label = 'Carrying ' .. resName(res) .. ' to the ' .. nameOf(c, site) .. ' site' })
+        task.steps[#task.steps + 1] = step('supply', { at = site.id, label = 'Unloading at the ' .. nameOf(c, site) .. ' site' })
     else
         task.label = 'Making ' .. resName(res)
         task.steps[#task.steps + 1] = step('goto', { to = storeId(c), label = 'Carrying ' .. resName(res) .. ' to the storehouse' })
@@ -979,7 +1069,7 @@ local function helperProcess(c, p, speed, site, need)
     reserve(c, inRes, inAmount)
     local n = math.min(outAmount, need)
     site.incoming[outRes] = (site.incoming[outRes] or 0) + n
-    local name = def(site).name
+    local name = nameOf(c, site)
     return {
         kind = 'process', site = p.id, helper = true,
         label = 'Making ' .. resName(outRes) .. ' for the ' .. name,
@@ -1028,6 +1118,39 @@ local function supplyRunTask(c, speed)
     end
 end
 
+-- Carry a load from a salvage pile back to the storehouse.
+local function salvageTask(c)
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.goods then
+            for _, res in ipairs(defs.resourceOrder) do
+                local left = (s.goods[res] or 0) - (s.claimed[res] or 0)
+                if left > 0 then
+                    local amount = math.min(left, defs.carryAmount)
+                    s.claimed[res] = (s.claimed[res] or 0) + amount
+                    local name = resName(res)
+                    return {
+                        kind = 'salvage', site = sid, label = 'Salvaging',
+                        salvage = { site = sid, res = res, amount = amount },
+                        steps = {
+                            step('goto', { to = sid, label = 'Going to collect ' .. name }),
+                            step('pickup', { at = sid, label = 'Picking up ' .. name }),
+                            step('goto', { to = storeId(c), label = 'Carrying ' .. name .. ' to the storehouse' }),
+                            step('store', { label = 'Storing ' .. name }),
+                        },
+                    }
+                end
+            end
+        end
+    end
+end
+
+local function pileEmpty(s)
+    for _, n in pairs(s.goods) do if n > 0 then return false end end
+    for _, n in pairs(s.claimed) do if n > 0 then return false end end
+    return true
+end
+
 local function constructionWork(c, speed)
     return buildTask(c, speed) or haulTask(c) or supplyRunTask(c, speed)
 end
@@ -1054,7 +1177,9 @@ local function someShelter(c)
     local list = {}
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
-        if s.built and def(s).beds and not def(s).sleepOn then list[#list + 1] = s end
+        if s.built and not s.host and not def(s).sleepOn and (ownBeds(s) > 0 or defs.look(s.kind, s.variant).door) then
+            list[#list + 1] = s
+        end
     end
     return #list > 0 and list[math.random(#list)] or nil
 end
@@ -1227,11 +1352,11 @@ function C.nextTask(c, wid)
                     task = gatherTask(c, w, s, speed)
                 end
             elseif w.assignment == 'builder' then
-                task = constructionWork(c, speed) or downtimeTask(c, w, 'work', speed)
+                task = constructionWork(c, speed) or salvageTask(c) or downtimeTask(c, w, 'work', speed)
             elseif w.prisoner then
                 task = idleTask(c, 'Locked up', 15)
             else
-                task = constructionWork(c, speed) or downtimeTask(c, w, 'work', speed)
+                task = constructionWork(c, speed) or salvageTask(c) or downtimeTask(c, w, 'work', speed)
             end
         end
     end
@@ -1275,6 +1400,16 @@ local function applyStep(c, w, st)
             w.carry = nil
             task.incoming = nil
         end
+    elseif st.op == 'pickup' then
+        local s = c.sites[st.at]
+        local claim = task.salvage
+        if s and claim then
+            s.goods[claim.res] = s.goods[claim.res] - claim.amount
+            s.claimed[claim.res] = s.claimed[claim.res] - claim.amount
+            w.carry = { res = claim.res, amount = claim.amount }
+            task.salvage, task.site = nil, nil
+            if pileEmpty(s) then C.removeSite(c, s.id) end
+        end
     elseif st.op == 'sell' then
         if w.carry then
             sellGoods(c, w.carry.res, w.carry.amount)
@@ -1306,6 +1441,7 @@ function C.completeStep(c, wid)
     if not w or not w.task then return nil end
     local st = w.task.steps[w.task.i]
     applyStep(c, w, st)
+    if not w.task then return nil end -- the step finished what the task was for (a move)
     w.task.i = w.task.i + 1
     local nxt = w.task.steps[w.task.i]
     if not nxt then w.task = nil end
@@ -1319,6 +1455,10 @@ function C.cancelTask(c, wid)
     local task = w.task
     if task then
         if task.holds then unreserve(c, task.holds.res, task.holds.amount) end
+        if task.salvage then
+            local pile = c.sites[task.salvage.site]
+            if pile then pile.claimed[task.salvage.res] = pile.claimed[task.salvage.res] - task.salvage.amount end
+        end
         if task.incoming then
             local s = c.sites[task.incoming.site]
             if s then
@@ -1437,7 +1577,28 @@ function C.simulateWorker(c, wid, dt, anyTime)
         return
     end
 
-    -- builders and laborers: move materials, then build
+    -- builders and laborers: move materials, then build; then bring in salvage
+    local function salvageAway()
+        for _, sid in ipairs(c.siteOrder) do
+            local pile = c.sites[sid]
+            if pile.goods and not pileEmpty(pile) then
+                w.abstractProgress = w.abstractProgress + dt * speed / (2 * C.tripSeconds(c, sid) + 3)
+                while w.abstractProgress >= 1 and not pileEmpty(pile) do
+                    w.abstractProgress = w.abstractProgress - 1
+                    for _, res in ipairs(defs.resourceOrder) do
+                        local n = math.min(defs.carryAmount, (pile.goods[res] or 0) - (pile.claimed[res] or 0))
+                        if n > 0 then
+                            pile.goods[res] = pile.goods[res] - n
+                            c.stock[res] = c.stock[res] + n
+                            break
+                        end
+                    end
+                end
+                if pileEmpty(pile) then C.removeSite(c, sid) end
+                return
+            end
+        end
+    end
     for _, sid in ipairs(c.siteOrder) do
         local site = c.sites[sid]
         if not site.built then
@@ -1448,7 +1609,8 @@ function C.simulateWorker(c, wid, dt, anyTime)
                     site.needs[res] = need - n
                 end
             end
-            if materialsComplete(site) then
+            -- in the house the player is in, only the crew they can see builds
+            if materialsComplete(site) and not (site.host and site.host == c.watchedHouse) then
                 local trip = defs.buildWorkPerTrip + 2 * C.tripSeconds(c, sid)
                 addBuildProgress(c, site, dt * speed * defs.buildWorkPerTrip / trip)
                 return
@@ -1473,6 +1635,7 @@ function C.simulateWorker(c, wid, dt, anyTime)
             end
         end
     end
+    salvageAway()
 end
 
 ---------------------------------------------------------------------------
@@ -1481,6 +1644,7 @@ end
 function C.workerStatus(c, wid)
     local w = c.workers[wid]
     if not w then return '' end
+    if w.roomStatus then return w.roomStatus end
     local st = C.currentStep(c, wid)
     if st and st.label then return st.label end
     if w.offscreen then
@@ -1523,6 +1687,13 @@ function C.siteStatus(c, sid)
     local s = c.sites[sid]
     if not s then return '' end
     local d = def(s)
+    if s.goods then
+        local parts = {}
+        for _, res in ipairs(defs.resourceOrder) do
+            if (s.goods[res] or 0) > 0 then parts[#parts + 1] = s.goods[res] .. ' ' .. resName(res) end
+        end
+        return table.concat(parts, ', ') .. ' to carry back'
+    end
     if not s.built then
         local p = C.siteProgress(c, sid)
         local parts = {}
@@ -1554,13 +1725,106 @@ function C.siteStatus(c, sid)
         if s.stalled then txt = txt .. ' - ' .. s.stalled end
         return txt
     end
-    if d.beds then return d.beds == 1 and '1 bed' or (d.beds .. ' beds') end
+    local beds = ownBeds(s)
+    if not s.host and defs.look(s.kind, s.variant).door then beds = bedsInside(c, sid) end
+    if beds > 0 or (d.beds and not d.sleepOn) then return beds == 1 and '1 bed' or (beds .. ' beds') end
     if d.storage then return 'Holds ' .. d.storage .. ' of everything' end
     if d.cells then
         return string.format('%d/%d prisoners (all cells)', C.prisonerCount(c), (C.cells(c)))
     end
     if d.small then return d.desc or '' end
     return 'Built'
+end
+
+-- Who's in a house right now, for when the player is inside. Returns a map of
+-- wid -> { kind = 'sleep'|'use'|'build'|'lounge', site =, label =, prop = }.
+-- Whoever was busy there when the player came in stays (`stay`, from
+-- C.roomStay); the rest follows from the time of day, the same for a whole
+-- game hour so that people don't come and go every moment.
+local function hashed(wid, hour)
+    local n = tonumber(wid:match('%d+')) or 0
+    return ((n * 2654435761 + hour * 40503) % 4294967296) / 4294967296
+end
+
+function C.roomStay(c, wid, house)
+    local st = C.currentStep(c, wid)
+    local s = st and st.at and c.sites[st.at]
+    if not s then return nil end
+    if st.op == 'rest' and st.at == house then return { kind = 'lounge', label = st.label } end
+    if s.host ~= house then return nil end
+    if st.op == 'sleep' then return { kind = 'sleep', site = s.id, label = 'Sleeping' } end
+    if st.op == 'work' then return { kind = 'build', site = s.id, label = st.label } end
+    if st.op == 'interact' or st.op == 'eat' then
+        local i = def(s).interact
+        return { kind = 'use', site = s.id, label = st.label, prop = st.prop or (i and i.prop) }
+    end
+end
+
+function C.roomRoster(c, house, stay)
+    local out, users, count = {}, {}, 0
+    local hour = math.floor(c.hours or 0)
+    if C.underAttack(c) then return out end -- everyone runs for it
+    local free, unbuilt = {}, {}
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.host == house then
+            if not s.built then unbuilt[#unbuilt + 1] = s
+            elseif def(s).interact then free[#free + 1] = s end
+        end
+    end
+    local crew = {}
+    local function add(wid, entry)
+        out[wid] = entry
+        count = count + 1
+        if entry.kind == 'use' then users[entry.site] = (users[entry.site] or 0) + 1 end
+        if entry.kind == 'build' then crew[entry.site] = (crew[entry.site] or 0) + 1 end
+    end
+    for _, wid in ipairs(c.workerOrder) do
+        local e = stay and stay[wid]
+        if e and c.workers[wid] and (not e.site or c.sites[e.site]) then
+            -- what they were building may have been finished since
+            local s = e.site and c.sites[e.site]
+            if not (e.kind == 'build' and s and s.built) then add(wid, e) end
+        end
+    end
+    for _, wid in ipairs(c.workerOrder) do
+        local w = c.workers[wid]
+        if not out[wid] and not w.prisoner and not isGuard(c, w) and count < defs.rooms.maxPeople then
+            local period = C.workerPeriod(c, wid)
+            if period == 'sleep' then
+                local bed = bedFor(c, w)
+                if bed.host == house and def(bed).sleepOn then
+                    add(wid, { kind = 'sleep', site = bed.id, label = 'Sleeping' })
+                end
+            elseif period == 'free' then
+                local roll = hashed(wid, hour)
+                if #free > 0 and roll < defs.rooms.visitChance then
+                    local s = free[(math.floor(roll * 1000) % #free) + 1]
+                    local i = def(s).interact
+                    if (users[s.id] or 0) < i.slots then
+                        add(wid, { kind = 'use', site = s.id, label = i.label, prop = i.prop })
+                    end
+                elseif roll > 1 - defs.rooms.loungeChance then
+                    add(wid, { kind = 'lounge', label = 'Relaxing in the ' .. def(c.sites[house]).name })
+                end
+            elseif not (w.assignment and w.assignment ~= 'builder') then
+                -- laborers and builders on what's being made in here
+                for _, s in ipairs(unbuilt) do
+                    if materialsComplete(s) and (crew[s.id] or 0) < (def(s).maxBuilders or 2) then
+                        add(wid, { kind = 'build', site = s.id, label = 'Building the ' .. def(s).name })
+                        break
+                    end
+                end
+            end
+        end
+    end
+    return out
+end
+
+-- Settlers building in the room the player is in: work done as they watch.
+function C.roomWork(c, sid, seconds)
+    local s = c.sites[sid]
+    if s and not s.built then addBuildProgress(c, s, seconds) end
 end
 
 -- A house's room in the interior cell (given out the first time it's entered).
@@ -1572,6 +1836,59 @@ function C.roomOf(c, sid)
     end
     return c.rooms[sid]
 end
+
+---------------------------------------------------------------------------
+-- moving buildings
+
+-- Materials and work to move a building of `kind` from one spot to another
+-- (spots: { x, y, yaw }). foundation: as for addSite.
+function C.moveCost(kind, from, to, foundation)
+    local d = defs.buildings[kind]
+    local m = defs.move
+    local dist = math.sqrt((to.x - from.x) ^ 2 + (to.y - from.y) ^ 2)
+    local turn = math.abs(math.deg(math.atan2(math.sin(to.yaw - from.yaw), math.cos(to.yaw - from.yaw))))
+    local wood = math.max(m.minWood, math.ceil(m.share * (d.cost.wood or 0) + dist * m.perUnit + turn * m.perDegree))
+    local work = math.ceil(m.workShare * d.work + dist * m.workPerUnit + turn * m.workPerDegree)
+    if foundation then
+        wood = wood + (foundation.wood or 0)
+        work = work + (foundation.work or 0)
+    end
+    return { wood = wood }, work
+end
+
+function C.canMove(c, sid)
+    local s = c.sites[sid]
+    return s and s.built and not s.moving and not s.host and not def(s).small and not def(s).salvage and not def(s).moves
+end
+
+-- Start moving a building: its move is a construction site at the new spot.
+-- foundation: { wood, work, depth } as for placing; leveled: the floor height
+-- given is final (sloped ground).
+function C.startMove(c, sid, pos, yaw, foundation, leveled, radius)
+    if not C.canMove(c, sid) then return nil end
+    local s = c.sites[sid]
+    local cost, work = C.moveCost(s.kind, { x = s.pos.x, y = s.pos.y, yaw = s.yaw }, { x = pos.x, y = pos.y, yaw = yaw })
+    local m = C.addSite(c, 'move', pos, yaw, false, { cost = cost, work = work, foundation = foundation, target = sid })
+    m.leveled, m.radius = leveled, radius
+    m.from = { x = s.pos.x, y = s.pos.y, z = s.pos.z, yaw = s.yaw }
+    s.moving = m.id
+    return m
+end
+
+finishMove = function(c, m)
+    local s = c.sites[m.target]
+    if s then
+        s.pos = { x = m.pos.x, y = m.pos.y, z = m.pos.z }
+        s.yaw, s.leveled, s.radius, s.moving = m.yaw, m.leveled, m.radius or s.radius, nil
+    end
+    m.free = true
+    C.removeSite(c, m.id)
+    if s then
+        emit(c, { kind = 'moved', site = s.id })
+        emit(c, { kind = 'msg', text = def(s).name .. ' has been moved.' })
+    end
+end
+
 
 function C.drainEvents(c)
     local evs = c.events
@@ -1588,6 +1905,7 @@ end
 --   only book their work when they finish it, but it should show as they go
 function C.siteVisuals(c, sid, busy)
     local s = c.sites[sid]
+    if s and s.goods then return { piles = copy(s.goods), pilings = 1 } end
     if not s or s.built then return nil end
     local work = siteWork(s)
     local progress = math.min(work, s.progress + (busy or 0))

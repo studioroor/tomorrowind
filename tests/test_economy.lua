@@ -66,7 +66,8 @@ end)
 
 test('a woodcutter takes about a working day for a house worth of timber', function()
     local _, gained = run({ lumber = 1 }, 0, 1, { food = 100 })
-    local house = defs.buildings.house.cost.wood
+    -- a house with three bedrolls added: room for four
+    local house = defs.buildings.house.cost.wood + 3 * defs.buildings.bedroll.cost.wood
     assert(gained.wood >= house * 0.75 and gained.wood <= house * 2, 'timber per day: ' .. gained.wood)
 end)
 
@@ -85,7 +86,8 @@ end)
 
 test('a bed costs about the same however you get it', function()
     local function worth(cost) return (cost.wood or 0) + 5 * (cost.ingot or 0) + (cost.ore or 0) end
-    local house = worth(defs.buildings.house.cost) / defs.buildings.house.beds
+    -- a house comes with one bed; three bedrolls fill it to four
+    local house = (worth(defs.buildings.house.cost) + 3 * worth(defs.buildings.bedroll.cost)) / 4
     local bed = worth(defs.buildings.bed.cost) / defs.buildings.bed.beds
     local roll = worth(defs.buildings.bedroll.cost) / defs.buildings.bedroll.beds
     assert(bed >= house * 0.75 and bed <= house * 1.25, string.format('bed %.0f vs house %.0f', bed, house))

@@ -149,7 +149,7 @@ test('hungry workers eat first, starving workers stop', function()
     local mine = C.addSite(c, 'mine', P(1000, 0), 0, true)
     C.assign(c, w[1], mine.id)
     local worker = c.workers[w[1]]
-    C.tick(c, 0, 4) -- 4 hours: fed = 1 - 4/6
+    worker.fed = 0.3
     assert(worker.fed < defs.hunger.eatBelow)
     local t = C.nextTask(c, w[1])
     eq(t.kind, 'eat')
@@ -159,11 +159,12 @@ test('hungry workers eat first, starving workers stop', function()
     eq(c.stock.food, food - defs.hunger.mealFood)
 
     c.stock.food = 0
-    C.tick(c, 0, 5) -- below hungry threshold
+    worker.fed = 0.2 -- below hungry threshold
     local t2 = C.nextTask(c, w[1])
     eq(t2.kind, 'gather')
     near(t2.steps[2].duration, defs.buildings.mine.cycle / defs.hunger.hungrySpeed)
     C.cancelTask(c, w[1])
+    worker.fed = 0.01
     C.tick(c, 0, 5)
     eq(worker.fed, 0)
     local t3 = C.nextTask(c, w[1])
@@ -177,7 +178,7 @@ test('houses add beds, newcomers arrive only with space and food', function()
     local wait = defs.arrival.everyHours + defs.arrival.perSettler * 4
     C.tick(c, 0, wait)
     eq(hasEvent(C.drainEvents(c), 'arrival'), nil, 'no beds free')
-    C.addSite(c, 'house', P(2000, 0), 0, true)
+    C.addSite(c, 'house', P(2000, 0), 0, true, { variant = 11 }) -- the one with beds of its own
     C.drainEvents(c)
     C.tick(c, 0, wait)
     assert(hasEvent(C.drainEvents(c), 'arrival'), 'arrival once there is a house')
@@ -206,7 +207,7 @@ test('reassigning cancels the current task cleanly', function()
     eq(C.nextTask(c, w[1]).kind, 'gather')
 end)
 
-test('removing an unfinished site refunds delivered materials', function()
+test('cancelling an unfinished site leaves what was delivered on the spot', function()
     local c, w = colony(1)
     c.stock.wood = 10
     local farm = C.addSite(c, 'farm', P(800, 0), 0, false)
@@ -214,8 +215,12 @@ test('removing an unfinished site refunds delivered materials', function()
     runTask(c, w[1]) -- delivers 5
     eq(c.stock.wood, 5)
     C.removeSite(c, farm.id)
-    eq(c.stock.wood, 10)
     eq(c.sites[farm.id], nil)
+    eq(c.stock.wood, 5, 'not back yet')
+    local pile
+    for _, sid in ipairs(c.siteOrder) do if c.sites[sid].goods then pile = c.sites[sid] end end
+    eq(pile.goods.wood, 5)
+    eq(pile.pos.x, 800)
 end)
 
 test('abstract simulation matches rates and respects inputs', function()
@@ -248,7 +253,8 @@ test('offscreen workers eat automatically during ticks', function()
     local worker = c.workers[w[1]]
     worker.offscreen = true
     local food = c.stock.food
-    C.tick(c, 0, 4)
+    worker.fed = 0.4
+    C.tick(c, 0, 1)
     assert(worker.fed > defs.hunger.eatBelow, "ate on the way")
     eq(c.stock.food, food - defs.hunger.mealFood)
 end)

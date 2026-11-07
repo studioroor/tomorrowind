@@ -347,6 +347,7 @@ local function pause(seconds)
 end
 
 handlers['take'] = pause(1.2)
+handlers['pickup'] = pause(1.2)
 handlers['store'] = pause(1.2)
 handlers['supply'] = pause(1.5)
 handlers['eat'] = {

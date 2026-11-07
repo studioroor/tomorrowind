@@ -185,3 +185,154 @@ test('site visuals: the building rises once materials and foundation are ready',
     s.progress = s.work
     eq(C.siteVisuals(c, s.id).rise, 1)
 end)
+
+local function salvagePile(c)
+    for _, sid in ipairs(c.siteOrder) do if c.sites[sid].goods then return c.sites[sid] end end
+end
+
+test('salvage is carried back by laborers, then the pile is gone', function()
+    local c, w = colony(2)
+    local smelter = C.addSite(c, 'smelter', P(600, 0), 0, true)
+    local events = C.drainEvents(c)
+    local wood, ore = c.stock.wood, c.stock.ore
+    C.removeSite(c, smelter.id)
+    local pile = salvagePile(c)
+    local share = defs.salvage.share
+    eq(pile.goods.wood, math.floor(defs.buildings.smelter.cost.wood * share))
+    eq(pile.goods.ore, math.floor(defs.buildings.smelter.cost.ore * share))
+    local added = false
+    for _, e in ipairs(C.drainEvents(c)) do if e.kind == 'site_added' and e.site == pile.id then added = true end end
+    eq(added, true)
+    C.setClock(c, 12, 30)
+    local guard = 0
+    while c.sites[pile.id] do
+        guard = guard + 1
+        assert(guard < 40, 'never cleared')
+        for _, id in ipairs(w) do
+            local t = C.nextTask(c, id)
+            run(c, id)
+        end
+    end
+    eq(c.stock.wood, wood + math.floor(defs.buildings.smelter.cost.wood * share))
+    eq(c.stock.ore, ore + math.floor(defs.buildings.smelter.cost.ore * share))
+end)
+
+test('two settlers never fetch the same salvage twice', function()
+    local c, w = colony(2)
+    local mine = C.addSite(c, 'mine', P(600, 0), 0, true)
+    C.removeSite(c, mine.id)
+    local pile = salvagePile(c)
+    pile.goods.wood = 6
+    C.setClock(c, 12, 30)
+    local a, b = C.nextTask(c, w[1]), C.nextTask(c, w[2])
+    eq(a.kind, 'salvage')
+    eq(b.kind, 'salvage')
+    eq(a.salvage.amount + b.salvage.amount, 6)
+    C.cancelTask(c, w[2])
+    eq(pile.claimed.wood, a.salvage.amount, 'a cancelled load is free again')
+end)
+
+test('salvage comes in while you are away too', function()
+    local c, w = colony(1)
+    local mine = C.addSite(c, 'mine', P(600, 0), 0, true)
+    local wood = c.stock.wood
+    C.removeSite(c, mine.id)
+    local pile = salvagePile(c)
+    C.setClock(c, 12, 30)
+    C.simulateWorker(c, w[1], 2000)
+    eq(c.sites[pile.id], nil)
+    eq(c.stock.wood, wood + math.floor(defs.buildings.mine.cost.wood * defs.salvage.share))
+end)
+
+test('construction comes before salvage', function()
+    local c, w = colony(1)
+    local mine = C.addSite(c, 'mine', P(600, 0), 0, true)
+    C.removeSite(c, mine.id)
+    C.addSite(c, 'farm', P(900, 0), 0, false)
+    C.setClock(c, 12, 30)
+    eq(C.nextTask(c, w[1]).kind, 'haul')
+end)
+
+test('a salvage pile says what is left', function()
+    local c = colony(0)
+    local mine = C.addSite(c, 'mine', P(600, 0), 0, true)
+    C.removeSite(c, mine.id)
+    local pile = salvagePile(c)
+    eq(C.siteStatus(c, pile.id), math.floor(defs.buildings.mine.cost.wood * defs.salvage.share) .. ' Timber to carry back')
+    eq(C.siteVisuals(c, pile.id).piles.wood, pile.goods.wood)
+end)
+
+test('moving costs more the further and the more it turns', function()
+    local from = { x = 0, y = 0, yaw = 0 }
+    local near_ = C.moveCost('house', from, { x = 300, y = 0, yaw = 0 })
+    local far = C.moveCost('house', from, { x = 3000, y = 0, yaw = 0 })
+    local turned = C.moveCost('house', from, { x = 300, y = 0, yaw = math.pi / 2 })
+    assert(far.wood > near_.wood and turned.wood > near_.wood)
+    local _, w1 = C.moveCost('house', from, { x = 300, y = 0, yaw = 0 })
+    local _, w2 = C.moveCost('house', from, { x = 300, y = 0, yaw = math.pi })
+    assert(w2 > w1)
+    -- turning right round one way or the other costs the same
+    local a = C.moveCost('house', from, { x = 0, y = 0, yaw = 0.3 })
+    local b = C.moveCost('house', from, { x = 0, y = 0, yaw = -0.3 })
+    eq(a.wood, b.wood)
+end)
+
+test('a move is built like anything else, then the building is in its new spot', function()
+    local c, w = colony(2)
+    c.stock.wood = 100
+    local mine = C.addSite(c, 'mine', P(600, 0), 0, true)
+    C.assign(c, w[1], mine.id)
+    local m = C.startMove(c, mine.id, P(1500, 400), 1.0, nil, false, 150)
+    assert(m)
+    eq(C.startMove(c, mine.id, P(0, 0), 0), nil, 'one move at a time')
+    eq(C.canMove(c, m.id), false)
+    C.setClock(c, 12, 30)
+    local guard = 0
+    while c.sites[m.id] do
+        guard = guard + 1
+        assert(guard < 60, 'never moved')
+        local t = C.nextTask(c, w[2])
+        run(c, w[2])
+    end
+    eq(mine.pos.x, 1500)
+    eq(mine.yaw, 1.0)
+    eq(mine.moving, nil)
+    eq(mine.built, true)
+    eq(c.workers[w[1]].assignment, mine.id, 'its workers stay on')
+    local moved = false
+    for _, e in ipairs(C.drainEvents(c)) do if e.kind == 'moved' and e.site == mine.id then moved = true end end
+    eq(moved, true)
+    for _, sid in ipairs(c.siteOrder) do assert(not c.sites[sid].goods, 'a finished move leaves no salvage') end
+end)
+
+test('cancelling a move leaves the building where it was', function()
+    local c = colony(0)
+    local mine = C.addSite(c, 'mine', P(600, 0), 0, true)
+    local m = C.startMove(c, mine.id, P(1500, 0), 0)
+    C.drainEvents(c)
+    C.removeSite(c, m.id)
+    eq(mine.pos.x, 600)
+    eq(mine.moving, nil)
+    local cancelled = false
+    for _, e in ipairs(C.drainEvents(c)) do if e.kind == 'move_cancelled' then cancelled = true end end
+    eq(cancelled, true)
+    eq(C.canMove(c, mine.id), true)
+end)
+
+test('demolishing a building on the move cancels the move', function()
+    local c = colony(0)
+    local mine = C.addSite(c, 'mine', P(600, 0), 0, true)
+    local m = C.startMove(c, mine.id, P(1500, 0), 0)
+    C.removeSite(c, mine.id)
+    eq(c.sites[m.id], nil)
+end)
+
+test('moves are named after what they move', function()
+    local c, w = colony(1)
+    c.stock.wood = 100
+    local mine = C.addSite(c, 'mine', P(600, 0), 0, true)
+    C.startMove(c, mine.id, P(1500, 0), 0)
+    C.setClock(c, 12, 30)
+    local t = C.nextTask(c, w[1])
+    assert(t.steps[3].label:find(defs.buildings.mine.name), t.steps[3].label)
+end)

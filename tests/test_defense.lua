@@ -105,3 +105,37 @@ test('stockade status shows prisoners', function()
     C.addWorker(c, { name = 'B', prisoner = true })
     eq(C.siteStatus(c, st.id), '1/4 prisoners (all cells)')
 end)
+
+test('going through jobs skips full ones, in both directions', function()
+    local c = C.new()
+    C.found(c, { x = 0, y = 0, z = 0 })
+    local ids = {}
+    for i = 1, 4 do ids[i] = C.addWorker(c, { name = 'W' .. i }).id end
+    local post = C.addSite(c, 'guardpost', { x = 300, y = 0, z = 0 }, 0, true)
+    local mine = C.addSite(c, 'mine', { x = 600, y = 0, z = 0 }, 0, true)
+    C.assign(c, ids[1], post.id)
+    C.assign(c, ids[2], post.id) -- the post is now full
+    -- laborer, builder, (post), mine: from builder, forward lands on the mine
+    C.assign(c, ids[3], 'builder')
+    local nextJob = C.nextAssignment(c, ids[3], 1)
+    eq(nextJob, mine.id)
+    -- and from the mine, back past the post to builder
+    C.assign(c, ids[3], mine.id)
+    eq(C.nextAssignment(c, ids[3], -1), 'builder')
+    -- someone already at a full post can still move on
+    assert(C.nextAssignment(c, ids[1], 1) == mine.id)
+    -- the whole way round works: laborer is false
+    C.assign(c, ids[3], 'builder')
+    eq(C.nextAssignment(c, ids[3], -1), false)
+end)
+
+test('prisoners only go through the jobs they can do', function()
+    local c = C.new()
+    C.found(c, { x = 0, y = 0, z = 0 })
+    C.addSite(c, 'stockade', { x = 900, y = 0, z = 0 }, 0, true)
+    local farm = C.addSite(c, 'farm', { x = 300, y = 0, z = 0 }, 0, true)
+    local mine = C.addSite(c, 'mine', { x = 600, y = 0, z = 0 }, 0, true)
+    local p = C.addWorker(c, { name = 'P', prisoner = true }).id
+    eq(C.nextAssignment(c, p, 1), mine.id, 'not builder, not the farm')
+    eq(farm.built, true)
+end)

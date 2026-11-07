@@ -26,6 +26,7 @@ Lua), and every settler is a unique Dunmer with their own name and face. The
 | Activate a building | Open the overview with that building |
 | Look at a settler | See what they're doing; **K** opens their row in the ledger |
 | **Delete** | Remove the furnishing you're looking at |
+| **M** | Move the building you're looking at |
 | **Z / X** | Rotate while placing; a wall or fence that has snapped on bends around the joint |
 | **Left / Right** | Next or previous model while placing (houses, tents, chairs, chests...) |
 | **Up / Down** | Raise or lower while placing |
@@ -45,21 +46,30 @@ Lua), and every settler is a unique Dunmer with their own name and face. The
 | Building | Cost | Does |
 |---|---|---|
 | Woodcutter's Camp | free | 3 woodcutters, each about 75 Timber a day |
-| Saltrice Paddy | 10 Timber | 3 farmers, each about 60 Saltrice a day (feeds about 6) |
+| Farm | 10 Timber | 3 farmers, each about 60 Food a day (feeds about 5). Grow saltrice, wickwheat, marshmerrow, ash yam or hackle-lo, or keep kwama: pick with Left/Right while placing |
 | Ore Vein | 16 Timber | 3 miners, each about 70 Raw Ore a day |
 | Smelter | 20 Timber, 8 Ore | 2 smelters, each about 25 Iron Ingots a day from 50 Ore |
 | Warehouse | 30 Timber | stores 150 more of everything |
-| Hlaalu House | 40 Timber, 8 Ingots | +4 beds |
+| Hlaalu House | 25 Timber, 4 Ingots | a room to furnish, with one bed |
 | Storehouse | (founding) | stores 150 of everything, 4 beds |
 
 These are for a building about 800 units from the storehouse: walking takes up
 part of the day, so layout matters. `tests/test_economy.lua` checks this balance.
 
+- **Moving** a building: look at it and press **M** (or **Move** in the ledger),
+  then place it again. It costs a share of the building plus timber and work for
+  every unit it travels and every degree it turns. A scaffold goes up at the new
+  spot, and the building slides over as the work is done. It keeps working
+  while it moves; cancelling the move leaves what was delivered as salvage.
+- **Demolishing** a building leaves half of what it cost in a pile on the spot,
+  and cancelling one leaves what was delivered. Laborers and builders carry it
+  back when there's no construction to do. Furnishings give everything back at
+  once.
 - **Storage is limited.** With no room, production stops until the stock is used
   or there is a warehouse.
 - **Newcomers** arrive every 2 game hours, plus 15 minutes per settler, if there
   is a free bed and enough food: 10, plus 3 per settler.
-- Settlers eat 2 Saltrice from the storehouse every few game hours. If they get
+- Settlers eat 3 Food from the storehouse about three times a day. If they get
   hungry they work at half speed, and if they're starving they stop working.
 - **Gathering on demand.** If a construction site needs something the
   storehouse doesn't have, idle laborers and builders go and make it at the
@@ -152,13 +162,19 @@ it and press **Delete**) gives its materials back.
 ### Houses
 
 Hlaalu houses, the Timber House and the Dunmer Shack have a working door. Their
-rooms copy the architecture of real Morrowind houses, and start empty. Identical
+rooms copy the architecture of real Morrowind houses, and come with the one bed
+the original house had. A house's beds are the ones in its room: add beds and
+bedrolls to house more settlers. (The Stilt House can't be entered yet and has 4
+beds of its own.) Identical
 houses share a floor plan but each keeps its own furniture.
 
 - Open the **Furnish** tab while inside and place furniture on the floor. Settlers
-  bring the materials to the door and make it inside, unseen.
-- Beds and bedrolls indoors count as beds, and settlers go in to sleep and use
-  furniture there, but you won't see them inside yet.
+  bring the materials to the door and make it inside.
+- Beds and bedrolls indoors count as beds. While you're inside, you'll find
+  settlers there: asleep in the beds at night, using the furniture in their free
+  time, and building what's being made. New arrivals walk in through the door,
+  and everyone goes back outside when you leave. Beds that come with a house
+  have no furniture to show, so to see people sleep, give them one.
 - Demolishing a house removes its room. Furniture materials come back, and what
   was in its chests goes to you.
 
@@ -241,6 +257,7 @@ tools/playtest.sh .playtest/run   # scripted in-game run (sandboxed config)
 TEST_CONTENT=visuals.omwscripts  tools/playtest.sh .playtest/vis   # views for screenshots
 TEST_CONTENT=saveload.omwscripts tools/playtest.sh .playtest/sl    # save, reload, compare
 TEST_CONTENT=day.omwscripts      tools/playtest.sh .playtest/day   # a day with furnishings (engine screenshots)
+TEST_CONTENT=people.omwscripts   tools/playtest.sh .playtest/ppl   # settlers in a room through a day
 TEST_CONTENT=home.omwscripts     tools/playtest.sh .playtest/home  # rooms, furniture per house, trade, caravans
 TEST_CONTENT=doors.omwscripts    tools/playtest.sh .playtest/doors # each house's door against open sky
 TEST_CONTENT=life.omwscripts     tools/playtest.sh .playtest/life  # board, rising, downtime, leaving, door traffic

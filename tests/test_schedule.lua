@@ -189,7 +189,7 @@ test('skipped time counts only the working hours', function()
     near(C.workSeconds(c, 0, 24), 11 * 3600 / 30, 1e-9, 'a whole day')
 end)
 
-test('removed furnishings give their materials back, buildings do not', function()
+test('removed furnishings give their materials back at once, buildings leave salvage', function()
     local c = colony(0)
     local chair = C.addSite(c, 'chair', P(100, 0), 0, true)
     local mine = C.addSite(c, 'mine', P(300, 0), 0, true)
@@ -199,6 +199,9 @@ test('removed furnishings give their materials back, buildings do not', function
     before = c.stock.wood
     C.removeSite(c, mine.id)
     eq(c.stock.wood, before)
+    local pile
+    for _, sid in ipairs(c.siteOrder) do if c.sites[sid].goods then pile = c.sites[sid] end end
+    eq(pile.goods.wood, math.floor(defs.buildings.mine.cost.wood * defs.salvage.share))
 end)
 
 test('everybody keeps their own hours, within sensible limits', function()
@@ -369,4 +372,14 @@ test('rising and piles can show work in progress', function()
     eq(C.siteVisuals(c, s.id).rise, 0)
     near(C.siteVisuals(c, s.id, s.work / 4).rise, 0.25, 1e-9)
     eq(C.siteVisuals(c, s.id, s.work * 2).rise, 1, 'never past the end')
+end)
+
+test('a new bed gets used by someone who slept in the storehouse so far', function()
+    local c, w = colony(1)
+    C.setClock(c, 23, 30)
+    eq(C.nextTask(c, w[1]).site, c.storehouse)
+    eq(c.workers[w[1]].bed, c.storehouse)
+    C.cancelTask(c, w[1])
+    local bed = C.addSite(c, 'bed', P(100, 0), 0, true)
+    eq(C.nextTask(c, w[1]).site, bed.id)
 end)

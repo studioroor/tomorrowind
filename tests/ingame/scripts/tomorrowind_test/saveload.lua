@@ -39,6 +39,9 @@ return {
                     dbg({ cmd = 'fxdump' })
                     for _, w in ipairs(snap.workers) do log('after load', w.name, w.status, 'enabled', w.obj.enabled) end
                     log('inside after load', tostring(snap.insideHost), self.cell.name, 'gold', snap.gold)
+                    for _, w in ipairs(snap.workers) do
+                        if w.obj.cell and w.obj.cell.name == 'Tomorrowind Interiors' then log('in the room', w.name, w.status, 'z', w.obj.position.z) end
+                    end
                     for _, s in ipairs(snap.sites) do if s.host then log('hosted', s.kind, s.built, s.obj and s.obj:isValid(), s.obj and s.obj.cell and s.obj.cell.name) end end
                     dbg({ cmd = 'leave' })
                     dbg({ cmd = 'hour', hour = 8 })
@@ -64,6 +67,26 @@ return {
                 dbg({ cmd = 'build', kind = 'house', pos = util.vector3(spot.x, spot.y, core.land.getHeightAt(spot, self.cell) + 150),
                     built = false, leveled = true, radius = 570, foundation = { wood = 10, work = 20 } })
             end)
+            -- the job buttons: a full guard post gets skipped
+            once('jobs0', 9, function() dbg({ cmd = 'build', kind = 'guardpost', pos = offset(400, 600), built = true }) end)
+            once('jobs1', 10, function()
+                core.sendGlobalEvent('TMW_Assign', { wid = snap.workers[2].id, target = siteId('guardpost') })
+                core.sendGlobalEvent('TMW_Assign', { wid = snap.workers[3].id, target = siteId('guardpost') })
+            end)
+            once('jobs2', 11, function()
+                log('job before', snap.workers[1].job)
+                core.sendGlobalEvent('TMW_CycleJob', { wid = snap.workers[1].id, dir = 1 })
+            end)
+            once('jobs3', 12, function()
+                log('job after one click', snap.workers[1].job, '(guard post is', snap.sites[#snap.sites].status, ')')
+                core.sendGlobalEvent('TMW_CycleJob', { wid = snap.workers[1].id, dir = 1 })
+            end)
+            once('jobs4', 13, function()
+                log('job after two clicks', snap.workers[1].job)
+                core.sendGlobalEvent('TMW_Assign', { wid = snap.workers[2].id, target = false })
+                core.sendGlobalEvent('TMW_Assign', { wid = snap.workers[3].id, target = false })
+                core.sendGlobalEvent('TMW_Assign', { wid = snap.workers[1].id, target = siteId('smelter') })
+            end)
             once('assign', 7, function()
                 core.sendGlobalEvent('TMW_Assign', { wid = snap.workers[1].id, target = siteId('smelter') })
             end)
@@ -80,7 +103,7 @@ return {
             once('enter', 30, function() dbg({ cmd = 'enter' }) end)
             once('chair', 32, function()
                 local p = self.position
-                self:sendEvent('TMW_DebugPlace', { kind = 'chair', at = util.vector3(p.x + 40, p.y + 150, p.z) })
+                self:sendEvent('TMW_DebugPlace', { kind = 'bed', at = util.vector3(p.x + 40, p.y + 150, p.z) })
             end)
             once('chair2', 33, function() self:sendEvent('TMW_DebugPlace', { confirm = true }) end)
             once('inside', 35, function()

@@ -23,7 +23,7 @@ local SITE_INTERVAL = 1 / 30
 -- persistent
 local c                      -- colony state (plain table, see core/colony.lua)
 local objs = { sites = {}, workers = {}, decor = {}, threats = {}, sitefx = {}, workfx = {}, indoors = {},
-    shells = {}, exits = {}, doors = {}, caravan = {} }
+    shells = {}, exits = {}, doors = {}, caravan = {}, inRoom = {} }
 local ghost                  -- { obj=, kind= } while the player is placing
 local recIds                 -- ids of our runtime records (see records.lua)
 
@@ -40,6 +40,10 @@ local checkThreats           -- defined with the main loop
 local debugOn = defs.debug
 local siteByObj = {}         -- object id -> sid
 local doorByObj = {}         -- object id -> { sid=, exit= }
+local ROOM_TOKEN = -1        -- steps in a room aren't the planner's
+local roomTimer, roomDirty = 0, false
+local roomOutQueue = {}      -- wid -> where they go when they leave a room
+local roomLeftAt = {}        -- wid -> sim time they were sent out (the move shows next frame)
 local caravanTraderId        -- object id of the trader while a caravan is here
 local workFxUntil = {}       -- sid -> sim time the smelter fire may go out
 local needsMigration = false
@@ -49,7 +53,7 @@ local lastKind, lastRemark = {}, {} -- wid -> last task kind, sim time of last r
 local awayFrom               -- what the colony had when the player left
 
 local doorPoint              -- defined with the workers
-local caravanArrives, caravanLeaves, removeRoom, pushState
+local caravanArrives, caravanLeaves, removeRoom, pushState, syncRoom, roomEveryoneOut
 local function log(...)
     print('[Tomorrowind]', ...)
 end
@@ -273,7 +277,27 @@ end
 -- The building itself comes up out of the ground as the work progresses,
 -- growing to full size on the way. A static copy: the site's own object stays
 -- the scaffold until the building is done.
+-- A building on the move slides from where it was to the new spot as the
+-- move's work gets done, lifted a little on the way and turning as it goes.
+local function syncMove(sid, s, v, fx)
+    local target = c.sites[s.target]
+    local o = target and objs.sites[s.target]
+    if not o or not o:isValid() then return end
+    local p = v.rise or 0
+    local step = math.floor(p * 100 / defs.rise.stepPercent)
+    if step == fx.moveStep then return end
+    fx.moveStep = step
+    p = step * defs.rise.stepPercent / 100
+    local look = defs.look(target.kind, target.variant)
+    local from = objectPos(s.target)
+    local to = v3(s.pos) + util.vector3(0, 0, look.lift or 0)
+    local turn = math.atan2(math.sin(s.yaw - target.yaw), math.cos(s.yaw - target.yaw))
+    local at = from + (to - from) * p + util.vector3(0, 0, math.sin(math.pi * p) * 40)
+    pcall(o.teleport, o, '', at, { rotation = util.transform.rotateZ(target.yaw + turn * p) })
+end
+
 local function syncRising(sid, s, d, v, fx)
+    if d.moves then return syncMove(sid, s, v, fx) end
     if v.rise == nil or (d.small and not d.rises) then return end
     local fullScale = d.scale or 1
     if fx.rising == nil then
@@ -312,7 +336,7 @@ end
 -- by one while the ground is leveled, then the building rising.
 local function syncSiteFx(sid)
     local s = c.sites[sid]
-    if not s or s.built then return end
+    if not s or (s.built and not s.goods) then return end
     -- work in progress counts: settlers only book it when they finish
     local busy = 0
     for _, wid in ipairs(c.workerOrder) do
@@ -445,13 +469,16 @@ local function spawnDecor(sid)
         for iy = -2, 2 do
             if not (ix == 0 and iy == 0) then
                 local p = v3(s.pos) + rot * util.vector3(ix * 110, iy * 110, 0)
-                local o = world.createObject(rec().decor.saltrice)
+                local o = world.createObject(rec().decor[d.crop or 'saltrice'])
                 o:teleport('', util.vector3(p.x, p.y, landHeight(p) or p.z), { rotation = util.transform.rotateZ(math.random() * 6.28) })
+                if d.cropScale then o:setScale(d.cropScale) end
                 list[#list + 1] = o
             end
         end
     end
 end
+
+local furnishHouse, arrivalPoint -- defined with the interiors
 
 local function setSiteObject(sid)
     local s = c.sites[sid]
@@ -464,9 +491,12 @@ local function setSiteObject(sid)
     if not s.leveled then s.pos.z = landHeight(v3(s.pos)) or s.pos.z end
     objs.sites[sid] = placeObject(recordId, objectPos(sid), s.yaw, siteScale(sid), siteCell(sid))
     removeDecor(sid)
-    if s.built then
+    if s.goods then
+        syncSiteFx(sid)
+    elseif s.built then
         spawnDecor(sid)
         removeSiteFx(sid)
+        if not s.host and not s.furnished and d.door then furnishHouse(sid) end
     else
         syncSiteFx(sid)
     end
@@ -804,6 +834,203 @@ local function buildRoom(sid)
     log('built room', sid, #shell, 'pieces')
 end
 
+-- Settlers in the room you're in. Everyone else stays outside as usual: they
+-- only come in while you're here to see it, and go back out when you leave.
+
+local function roomFloorSpot(sid, slot)
+    local room = interiors[defs.look(c.sites[sid].kind, c.sites[sid].variant).door.interior]
+    local yaw = room.arrive.yaw
+    local side = (slot % 5 - 2) * 70
+    return roomOrigin(sid) + util.transform.rotateZ(yaw) * util.vector3(side, 170 + (slot % 3) * 60, room.floor + 2)
+end
+
+-- Where someone stands for what they're doing, and what they look at.
+local function roomPlace(wid, e)
+    local site = e.site and c.sites[e.site]
+    if not site then
+        local spot = roomFloorSpot(objs.insideHost, tonumber(wid:match('%d+')) or 0)
+        return spot, roomOrigin(objs.insideHost)
+    end
+    local at = v3(site.pos)
+    if e.kind == 'sleep' then return at end
+    -- beside it, on the side towards where you came in, spread by person
+    local toDoor = roomOrigin(objs.insideHost) - at
+    local base = math.atan2(toDoor.x, toDoor.y) + ((tonumber(wid:match('%d+')) or 0) % 4 - 1.5) * 0.7
+    local r = (e.kind == 'build' and 75 or math.max(70, siteRadius(e.site) + 45))
+    return at + util.vector3(math.sin(base) * r, math.cos(base) * r, 0), at
+end
+
+-- Start what they're doing there.
+local function roomAct(wid)
+    local e = objs.inRoom[wid]
+    local o = objs.workers[wid]
+    if not e or not o or not o:isValid() then return end
+    local spot, look = roomPlace(wid, e)
+    local msg = { token = ROOM_TOKEN, duration = 1e6, center = look or spot, label = e.label }
+    if e.kind == 'sleep' then
+        local site = c.sites[e.site]
+        local d = defs.look(site.kind, site.variant)
+        pcall(o.teleport, o, interiors.cell, v3(site.pos) + util.vector3(0, 0, d.sleepZ or 40),
+            { rotation = util.transform.rotateZ(site.yaw + (defs.sleepYaw or 0)) })
+        msg.op = 'sleep'
+    elseif e.kind == 'build' then
+        msg.op, msg.tool, msg.sound = 'work', rec().tools[defs.builderTool], defs.buildSound
+    else
+        msg.op = 'interact'
+        msg.carryModel = e.prop and defs.propModels[e.prop] or nil
+    end
+    o:sendEvent('TMW_Step', msg)
+end
+
+-- Into the room: on the spot if they were here when you came in, otherwise in
+-- through the door on their way to it.
+local function roomArrive(wid, e, directly)
+    local o = objs.workers[wid]
+    if not o or not o:isValid() then return end
+    local w = c.workers[wid]
+    C.cancelTask(c, wid)
+    tokens[wid] = nil
+    objs.indoors[wid] = nil
+    w.offscreen = true
+    w.roomStatus = e.label
+    e.out = plain(doorPoint(objs.insideHost))
+    objs.inRoom[wid] = e
+    o.enabled = true
+    local spot = roomPlace(wid, e)
+    if directly then
+        pcall(o.teleport, o, interiors.cell, spot + util.vector3(0, 0, 10), { onGround = true })
+        roomAct(wid)
+    else
+        e.walking = true
+        pcall(o.teleport, o, interiors.cell, arrivalPoint(objs.insideHost), { onGround = true })
+        o:sendEvent('TMW_Step', { op = 'goto', inside = true, center = spot, standoff = 20, token = ROOM_TOKEN, label = e.label })
+    end
+end
+
+local function roomOut(wid)
+    local e = objs.inRoom[wid]
+    objs.inRoom[wid] = nil
+    local w = c.workers[wid]
+    if w then w.roomStatus = nil end
+    local o = objs.workers[wid]
+    if e and o and o:isValid() then
+        o:sendEvent('TMW_Stop')
+        -- next frame: they may have been moved already in this one
+        roomOutQueue[wid] = e.out
+    end
+    tokens[wid] = nil
+end
+
+local function roomProcessOut()
+    for wid, out in pairs(roomOutQueue) do
+        local o = objs.workers[wid]
+        if not o or not o:isValid() then
+            roomOutQueue[wid] = nil
+        elseif pcall(o.teleport, o, '', v3(out), { onGround = true }) then
+            roomOutQueue[wid] = nil
+            roomLeftAt[wid] = c.time
+        end
+    end
+end
+
+-- Nobody stays behind in a room with nothing to do there.
+local function roomSweep()
+    for wid, o in pairs(objs.workers) do
+        local justLeft = roomLeftAt[wid] and c.time - roomLeftAt[wid] < 3
+        if not objs.inRoom[wid] and not roomOutQueue[wid] and not justLeft and o:isValid() and o.cell and o.cell.name == interiors.cell then
+            local store = c.sites[c.storehouse]
+            log('sending back outside', wid)
+            roomOutQueue[wid] = plain(v3(store.pos) + util.vector3(0, -(siteRadius(c.storehouse) + 150), 40))
+        end
+    end
+end
+
+roomEveryoneOut = function()
+    for wid in pairs(objs.inRoom) do roomOut(wid) end
+    objs.roomStay = nil
+end
+
+-- They've reached where they were walking in the room.
+local function roomStepDone(wid)
+    local e = objs.inRoom[wid]
+    if not e then return end
+    if e.leaving then
+        roomOut(wid)
+    elseif e.walking then
+        e.walking = nil
+        roomAct(wid)
+    end
+end
+
+-- Compare who should be here with who is.
+syncRoom = function(entering)
+    local house = objs.insideHost
+    if not house or not c.sites[house] then return end
+    local roster = C.roomRoster(c, house, objs.roomStay)
+    for wid, e in pairs(objs.inRoom) do
+        local want = roster[wid]
+        if not c.workers[wid] then
+            objs.inRoom[wid] = nil
+        elseif not want and not e.leaving then
+            -- out through the door
+            e.leaving, e.walking = true, nil
+            local o = objs.workers[wid]
+            if o and o:isValid() then
+                -- to where you come in: the door itself is in the wall
+                o:sendEvent('TMW_Step', { op = 'goto', inside = true, standoff = 20, token = ROOM_TOKEN,
+                    center = arrivalPoint(house), label = 'Heading out' })
+                c.workers[wid].roomStatus = 'Heading out'
+            end
+        elseif want and not e.leaving and (want.kind ~= e.kind or want.site ~= e.site) then
+            e.kind, e.site, e.label, e.prop = want.kind, want.site, want.label, want.prop
+            c.workers[wid].roomStatus = want.label
+            e.walking = true
+            local o = objs.workers[wid]
+            if o and o:isValid() then
+                o:sendEvent('TMW_Step', { op = 'goto', inside = true, center = roomPlace(wid, e), standoff = 20, token = ROOM_TOKEN, label = want.label })
+            end
+        end
+    end
+    for wid, want in pairs(roster) do
+        if not objs.inRoom[wid] then roomArrive(wid, want, entering) end
+    end
+end
+
+-- The bed a vanilla room had, as one of ours: the same model if we have it.
+local function bedLook(model)
+    for _, kind in ipairs({ 'bed', 'bedroll' }) do
+        local d = defs.buildings[kind]
+        for i = 1, math.max(1, #(d.variants or {})) do
+            local look = defs.look(kind, i)
+            if look.model:lower() == model:lower() then return kind, i end
+        end
+    end
+    return 'bed', 1
+end
+
+furnishHouse = function(sid)
+    local s = c.sites[sid]
+    local room = interiors[defs.look(s.kind, s.variant).door.interior]
+    local origin = roomOrigin(sid)
+    local beds = {}
+    for _, b in ipairs(room.beds or {}) do
+        local kind, variant = bedLook(b[1])
+        beds[#beds + 1] = { kind = kind, variant = variant, yaw = b[4],
+            pos = { x = origin.x + b[2], y = origin.y + b[3], z = origin.z + room.floor } }
+    end
+    for _, bed in ipairs(C.furnishHouse(c, sid, beds)) do
+        bed.leveled = true
+        setSiteObject(bed.id)
+    end
+end
+
+-- Where you stand when you come in: on the floor, not above it.
+arrivalPoint = function(sid)
+    local s = c.sites[sid]
+    local room = interiors[defs.look(s.kind, s.variant).door.interior]
+    return roomOrigin(sid) + util.vector3(0, 0, room.floor + 2)
+end
+
 local function enterHouse(sid, actor)
     local ok, cell = pcall(world.getCellByName, interiors.cell)
     if not ok or not cell then
@@ -813,15 +1040,24 @@ local function enterHouse(sid, actor)
     local s = c.sites[sid]
     local room = interiors[defs.look(s.kind, s.variant).door.interior]
     objs.insideHost = sid
-    actor:teleport(interiors.cell, roomOrigin(sid), { rotation = util.transform.rotateZ(room.arrive.yaw) })
+    c.watchedHouse = sid
+    actor:teleport(interiors.cell, arrivalPoint(sid), { rotation = util.transform.rotateZ(room.arrive.yaw) })
     actor:sendEvent('TMW_Face', { yaw = room.arrive.yaw })
+    -- whoever is busy in here carries on where you can see them
+    objs.roomStay = {}
+    for _, wid in ipairs(c.workerOrder) do
+        objs.roomStay[wid] = C.roomStay(c, wid, sid)
+    end
+    syncRoom(true)
     pushState()
 end
 
 local function leaveHouse(sid, actor)
     local s = c.sites[sid]
     local d = defs.look(s.kind, s.variant).door
+    roomEveryoneOut()
     objs.insideHost = nil
+    c.watchedHouse = nil
     local yaw = s.yaw + d.turn + math.pi
     actor:teleport('', doorPoint(sid) + util.vector3(0, 0, 20), { rotation = util.transform.rotateZ(yaw), onGround = true })
     actor:sendEvent('TMW_Face', { yaw = yaw })
@@ -831,6 +1067,8 @@ end
 -- A house is gone: its room goes too (the furniture has its own removal).
 removeRoom = function(sid)
     if objs.insideHost == sid and player() then
+        roomEveryoneOut()
+        c.watchedHouse = nil
         local p = player()
         local s = c.sites[c.storehouse]
         objs.insideHost = nil
@@ -849,7 +1087,7 @@ local function replanAll()
         C.cancelTask(c, wid)
         tokens[wid] = nil
         local o = objs.workers[wid]
-        if o and o:isValid() then o:sendEvent('TMW_Stop') end
+        if o and o:isValid() and not objs.inRoom[wid] then o:sendEvent('TMW_Stop') end
     end
 end
 
@@ -860,7 +1098,21 @@ local function processEvents()
             log(e.kind)
         elseif e.kind == 'arrival' then
             spawnWorker()
+        elseif e.kind == 'site_added' then
+            setSiteObject(e.site)
         elseif e.kind == 'site_placed' then
+            setSiteObject(e.site)
+            local m = c.sites[e.site]
+            if m.target then
+                -- what stands around it is put up again at the new spot
+                removeDecor(m.target)
+                objs.doors[m.target] = nil
+                local fire = objs.workfx[m.target]
+                if fire and fire:isValid() then fire:remove() end
+                objs.workfx[m.target] = nil
+                rebuildIndex()
+            end
+        elseif e.kind == 'moved' or e.kind == 'move_cancelled' then
             setSiteObject(e.site)
             -- new work: those just pottering about get to it
             for _, wid in ipairs(c.workerOrder) do
@@ -947,11 +1199,13 @@ local function snapshot()
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
         snap.sites[#snap.sites + 1] = {
-            id = sid, kind = s.kind, name = defs.buildings[s.kind].name,
+            id = sid, kind = s.kind,
+            name = s.target and ('Moving the ' .. C.nameOf(c, s)) or defs.look(s.kind, s.variant).label or defs.buildings[s.kind].name,
             built = s.built, status = C.siteStatus(c, sid),
             progress = C.siteProgress(c, sid),
             pos = v3(s.pos), radius = siteRadius(sid),
             obj = objs.sites[sid], yaw = s.yaw, small = defs.buildings[s.kind].small, variant = s.variant, host = s.host,
+            canMove = C.canMove(c, sid) or false,
         }
     end
     for _, opt in ipairs(C.assignmentOptions(c)) do
@@ -1057,7 +1311,8 @@ local function updateSites(dt)
     if siteTimer < SITE_INTERVAL then return end
     siteTimer = 0
     for _, sid in ipairs(c.siteOrder) do
-        if not c.sites[sid].built then syncSiteFx(sid) end
+        local s = c.sites[sid]
+        if not s.built or s.goods then syncSiteFx(sid) end
     end
 end
 
@@ -1070,6 +1325,7 @@ local function updateWorkers(dt)
     checkThreats()
     updateWorkFx()
     caravanGuar()
+    roomSweep()
     local active = activeSet()
     local anyActive = false
     for _, wid in ipairs(c.workerOrder) do
@@ -1077,6 +1333,16 @@ local function updateWorkers(dt)
         local o = objs.workers[wid]
         local isActive = o and o:isValid() and active[o.id]
         anyActive = anyActive or isActive
+        if objs.inRoom[wid] then
+            -- in the room with the player: the work still counts
+            local e = objs.inRoom[wid]
+            if e.kind == 'build' and not e.walking and not e.leaving then
+                C.roomWork(c, e.site, offscreenDt)
+            elseif e.kind ~= 'build' then
+                C.simulateWorker(c, wid, offscreenDt)
+            end
+            goto nextWorker
+        end
         local wakeAt = objs.indoors[wid]
         if wakeAt then
             -- asleep indoors: wakes in the morning, or when the task was
@@ -1104,6 +1370,7 @@ local function updateWorkers(dt)
             end
             C.simulateWorker(c, wid, offscreenDt)
         end
+        ::nextWorker::
     end
     -- inside one of the colony's own houses isn't away
     if #c.workerOrder > 0 then noteAway(anyActive or objs.insideHost ~= nil) end
@@ -1128,8 +1395,9 @@ local function migrateSites()
     if not hasBoard and c.storehouse then addBoard() end
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
-        if s.built and not s.host and defs.look(s.kind, s.variant).door and not objs.doors[sid] then
-            setSiteObject(sid)
+        if s.built and not s.host and defs.look(s.kind, s.variant).door then
+            if not objs.doors[sid] then setSiteObject(sid)
+            elseif not s.furnished then furnishHouse(sid) end
         end
     end
     for _, sid in ipairs(c.siteOrder) do
@@ -1143,6 +1411,7 @@ end
 
 local function onUpdate(dt)
     applyGhostMove()
+    roomProcessOut()
     if not c then return end
     if needsMigration then
         needsMigration = false
@@ -1168,6 +1437,16 @@ local function onUpdate(dt)
     end
     C.tick(c, dt, hours, skipping)
     updateWorkers(dt)
+    if roomDirty then
+        -- after loading a save, scripts have forgotten what they were doing
+        roomDirty = false
+        for wid in pairs(objs.inRoom) do roomAct(wid) end
+    end
+    roomTimer = roomTimer + dt
+    if roomTimer >= 2 then
+        roomTimer = 0
+        syncRoom(false)
+    end
     updateSites(dt)
     processEvents()
 
@@ -1203,6 +1482,10 @@ end
 local function onStepDone(e)
     if not c then return end
     local wid = e.wid or (e.actor and workerByObj[e.actor.id])
+    if e.token == ROOM_TOKEN then
+        if wid then roomStepDone(wid) end
+        return
+    end
     if not wid or not c.workers[wid] or tokens[wid] ~= e.token then return end
     if e.teleport then log('stuck, teleporting', wid) end
     if C.completeStep(c, wid) then
@@ -1292,7 +1575,16 @@ local function assign(e)
     tokens[e.wid] = nil -- replan on next active pass
     local o = objs.workers[e.wid]
     if o and o:isValid() then o:sendEvent('TMW_Stop') end
+    if objs.inRoom[e.wid] then roomAct(e.wid) end
     pushState()
+end
+
+-- The < > buttons: on to the next job this settler can take.
+local function cycleJob(e)
+    if not c then return end
+    local target = C.nextAssignment(c, e.wid, e.dir)
+    if target == nil then return message('There is no other job free.') end
+    assign({ wid = e.wid, target = target })
 end
 
 local function removeGhost()
@@ -1311,7 +1603,7 @@ local function beginPlace(e)
     local o = world.createObject(lookRecord(e.kind, e.variant))
     o:teleport(p.cell, p.position + util.vector3(0, 0, -5000))
     if look.scale then o:setScale(look.scale) end
-    ghost = { obj = o, kind = e.kind, variant = e.variant }
+    ghost = { obj = o, kind = e.kind, variant = e.variant, moving = e.moving }
     p:sendEvent('TMW_Ghost', { obj = o, kind = e.kind })
 end
 
@@ -1335,7 +1627,15 @@ local function placeConfirm(e)
     if not c or not ghost then return end
     local kind = ghost.kind
     local variant = ghost.variant
+    local moving = ghost.moving
     removeGhost()
+    if moving then
+        if C.startMove(c, moving, plain(e.pos), e.yaw or 0, e.foundation, true, e.radius) then
+            processEvents()
+            message('The ' .. defs.buildings[kind].name .. ' will be moved.')
+        end
+        return pushState()
+    end
     local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, false, { foundation = e.foundation, variant = variant, host = objs.insideHost })
     s.leveled = true -- e.pos.z is the computed floor level
     s.radius = e.radius
@@ -1494,6 +1794,15 @@ local function debugCommand(e)
                 log(string.format('rise %s shown=%.3f progress=%.1f/%.1f z=%.0f', sid, fx.riseShown or -1, c.sites[sid].progress, c.sites[sid].work, fx.rising.position.z))
             end
         end
+    elseif e.cmd == 'move' and c then
+        -- test helper: move the first building of a kind
+        for _, sid in ipairs(c.siteOrder) do
+            if c.sites[sid].kind == e.kind and C.canMove(c, sid) then
+                C.startMove(c, sid, plain(e.pos), e.yaw or 0, nil, false, nil)
+                processEvents()
+                break
+            end
+        end
     elseif e.cmd == 'talk' and c then
         local o = objs.workers[c.workerOrder[1]]
         if o then o:activateBy(player()) end
@@ -1608,6 +1917,9 @@ return {
             objs.sitefx = objs.sitefx or {}
             objs.shells, objs.exits, objs.doors = objs.shells or {}, objs.exits or {}, objs.doors or {}
             objs.caravan = objs.caravan or {}
+            objs.inRoom = objs.inRoom or {}
+            roomOutQueue = {}
+            roomDirty = next(objs.inRoom) ~= nil
             caravanTraderId = objs.caravan.trader and objs.caravan.trader:isValid() and objs.caravan.trader.id or nil
             objs.workfx = objs.workfx or {} -- fires go out on the next update
             -- tasks don't survive a reload: everyone who was asleep indoors gets up
@@ -1638,6 +1950,7 @@ return {
         TMW_Hop = onHop,
         TMW_Utter = onUtter,
         TMW_Assign = assign,
+        TMW_CycleJob = cycleJob,
         TMW_BeginPlace = beginPlace,
         TMW_PlaceMove = placeMove,
         TMW_PlaceConfirm = placeConfirm,

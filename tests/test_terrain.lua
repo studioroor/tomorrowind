@@ -60,7 +60,9 @@ test('foundation adds timber and leveling work to a site', function()
     -- refund includes the foundation timber
     C.cancelTask(c, w)
     C.removeSite(c, farm.id)
-    eq(c.stock.wood, 100)
+    local onSite = 0
+    for _, sid in ipairs(c.siteOrder) do if c.sites[sid].goods then onSite = c.sites[sid].goods.wood end end
+    eq(c.stock.wood + onSite, 100, 'foundation timber included')
 end)
 
 test('tall buildings may sink deeper into a slope', function()
