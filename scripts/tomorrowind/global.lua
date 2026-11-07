@@ -17,7 +17,7 @@ local CAPTIVE_SCRIPT = 'scripts/tomorrowind/captive.lua'
 local STATE_INTERVAL = 0.5
 local ACTIVE_INTERVAL = 0.5
 local STEP_WATCHDOG = 150
-local SITE_INTERVAL = 0.1
+local SITE_INTERVAL = 1 / 30
 
 -- persistent
 local c                      -- colony state (plain table, see core/colony.lua)
@@ -40,6 +40,7 @@ local siteByObj = {}         -- object id -> sid
 local workFxUntil = {}       -- sid -> sim time the smelter fire may go out
 local needsMigration = false
 local siteTimer = 0
+local quiet = false          -- no messages (filming)
 local lastKind, lastRemark = {}, {} -- wid -> last task kind, sim time of last remark
 local awayFrom               -- what the colony had when the player left
 
@@ -59,7 +60,7 @@ local function player() return world.players[1] end
 
 local function message(text)
     local p = player()
-    if p then p:sendEvent('TMW_Message', { text = text }) end
+    if p and not quiet then p:sendEvent('TMW_Message', { text = text }) end
 end
 
 local function rebuildIndex()
@@ -875,7 +876,7 @@ local function noteAway(anyActive)
     if #parts > 0 then message('While you were away: ' .. table.concat(parts, ', ') .. '.') end
 end
 
--- Construction moves on a few times a second, so buildings rise smoothly.
+-- Construction moves on every other frame or so, so buildings rise smoothly.
 local function updateSites(dt)
     siteTimer = siteTimer + dt
     if siteTimer < SITE_INTERVAL then return end
@@ -1112,7 +1113,8 @@ local function assign(e)
 end
 
 local function removeGhost()
-    if ghost and ghost.obj and ghost.obj:isValid() then ghost.obj:remove() end
+    -- pcall: an object created this very frame can't be removed yet
+    if ghost and ghost.obj and ghost.obj:isValid() then pcall(ghost.obj.remove, ghost.obj) end
     ghost = nil
 end
 
@@ -1205,9 +1207,19 @@ local function debugCommand(e)
         local r = world.createRecord(types.NPC.createRecordDraft({ template = base, name = 'Test Bandit', isMale = true,
             head = 'b_n_dark elf_m_head_04', hair = 'b_n_dark elf_m_hair_05', class = 'commoner' }))
         local o = world.createObject(r.id)
-        o:teleport('', e.pos, { onGround = true })
-        world.createObject('iron club'):moveInto(types.Actor.inventory(o))
+        -- by the first settler, or right next to a guard
         local victim = objs.workers[c.workerOrder[1]]
+        local pos = e.pos
+        if e.nearGuard then
+            for _, wid in ipairs(c.workerOrder) do
+                local g = objs.workers[wid]
+                if C.isGuard(c, wid) and g and g:isValid() then victim = g break end
+            end
+            pos = victim.position + util.vector3(math.sin(e.angle or 0) * e.nearGuard, math.cos(e.angle or 0) * e.nearGuard, 60)
+        end
+        o:teleport('', pos, { onGround = true })
+        world.createObject('iron club'):moveInto(types.Actor.inventory(o))
+        if e.alarm then onAttacked({ attacker = o }) end
         if victim then o:sendEvent('StartAIPackage', { type = 'Combat', target = victim }) end
         log('spawned test hostile')
     elseif e.cmd == 'debug' then
@@ -1243,6 +1255,9 @@ local function debugCommand(e)
                 break
             end
         end
+    elseif e.cmd == 'movew' and c then
+        local o = objs.workers[e.wid]
+        if o then o:teleport(o.cell, e.pos, { onGround = true }) end
     elseif e.cmd == 'risedump' and c then
         for sid, fx in pairs(objs.sitefx) do
             if fx.rising and fx.rising:isValid() then
@@ -1264,11 +1279,21 @@ local function debugCommand(e)
     elseif e.cmd == 'hour' then
         -- test helper: run the clock forward to an hour of the day
         world.advanceTime(((e.hour - (world.getGameTime() / 3600)) % 24))
+    elseif e.cmd == 'quiet' then
+        quiet = e.on
+        if player() then player():sendEvent('TMW_DebugQuiet', e.on) end
     elseif e.cmd == 'sitestate' and c then
-        -- test helper: jump a construction site to a stage of its progress
+        -- test helper: jump a construction site (by kind, or the one at a
+        -- position) to a stage of its progress, or finish it
         for _, sid in ipairs(c.siteOrder) do
             local site = c.sites[sid]
-            if site.kind == e.kind and not site.built then
+            local here = e.at and (v3(site.pos) - util.vector3(e.at.x, e.at.y, site.pos.z)):length() < 5
+            if (here or (not e.at and site.kind == e.kind)) and not site.built then
+                if e.finish then
+                    C.finishSite(c, sid)
+                    processEvents()
+                    break
+                end
                 for res, total in pairs(site.cost) do
                     site.needs[res] = math.floor(total * (1 - e.delivered) + 0.5)
                 end

@@ -186,6 +186,20 @@ scripts/tomorrowind/
 - **Tool swings** reuse the one-handed *chop* attack, played in two halves
   that skip the animation's `Chop Hit` key. A swing can never damage anyone.
 
+## Ideas and bugs
+
+Got an idea or found a bug? [Open an issue](https://github.com/studioroor/tomorrowind/issues).
+
+## Licence
+
+Copyright (C) 2026 Drikus Roor. The code is free software under the GNU General
+Public License, version 3: see [LICENSE](LICENSE).
+
+The meshes in `meshes/tomorrowind/` are not covered by that licence. They are
+modified copies of meshes from *The Elder Scrolls III: Morrowind* by Bethesda
+Softworks, included as a mod for owners of the game. You need your own copy of
+Morrowind to play.
+
 ## Tests
 
 ```sh
@@ -204,6 +218,12 @@ TEST_CONTENT=tent.omwscripts     tools/playtest.sh .playtest/tent  # doorway ray
 TEST_CONTENT=gallery.omwscripts  tools/playtest.sh .playtest/gal   # look at vanilla models
 TEST_CONTENT=probe.omwscripts    tools/playtest.sh .playtest/probe # measure model sizes
 ```
+
+The trailer is made here too: `tools/film_trailer.sh .playtest/take` films it
+with scripted cameras (the engine saves every frame, no screen recording), and
+`tools/make_trailer.py .playtest/take trailer/` cuts it, adding captions in
+MysticCards (OpenMW's Morrowind-style font) and sound (needs ffmpeg, Pillow and
+numpy; `--music file` replaces the generated music).
 
 `meshes/tomorrowind/` holds the tent, made from the game's own Ashlander tent
 by `tools/make_tent_meshes.py` (see the script for what it changes and why).

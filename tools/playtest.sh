@@ -12,11 +12,12 @@ mkdir -p "$OUT/cfg" "$OUT/userdata" "$OUT/shots"
 swiftc -O "$ROOT/tools/winid.swift" -o "$OUT/winid" 2>/dev/null
 cat > "$OUT/cfg/settings.cfg" <<CFG
 [Video]
-resolution x = 1280
-resolution y = 800
+resolution x = ${RES_X:-1280}
+resolution y = ${RES_Y:-800}
 window mode = 2
 [Sound]
 master volume = 0
+${EXTRA_SETTINGS:-}
 CFG
 OPENMW="${OPENMW:-/Applications/OpenMW 0.52 RC1/OpenMW.app/Contents/MacOS/openmw}"
 # load the mod unless the user's own config already does
@@ -36,7 +37,7 @@ for t in ${SHOTS:-20 45 75 110 140}; do
   WID=$("$OUT/winid" openmw 2>/dev/null) && kill -0 $PID 2>/dev/null && screencapture -x -o -l "$WID" "$OUT/shots/t$t.png" 2>/dev/null
 done
 # the autotest quits the game itself; this is only a safety net
-while kill -0 $PID 2>/dev/null && [ $SECONDS -lt 240 ]; do sleep 1; done
+while kill -0 $PID 2>/dev/null && [ $SECONDS -lt ${MAX_SECONDS:-240} ]; do sleep 1; done
 kill $PID 2>/dev/null
 wait $PID 2>/dev/null
 echo "exit: done"

@@ -577,6 +577,7 @@ local LABEL_RANGE = 3000
 local LABEL_CONE = 0.22        -- how near the middle of the view, as part of the screen
 local labels, labelT = nil, 0
 local debugOn = defs.debug
+local quietUi = false        -- no labels or panels (filming)
 local hoverSite              -- the furnishing being looked at (has its own panel)
 local hoverWorker            -- the settler being looked at
 local bubbles = {}           -- list of { obj=, text=, until= }
@@ -636,7 +637,7 @@ local function updateLabels(dt)
     labelT = labelT - dt
     if labelT > 0 then return end
     labelT = 0.1
-    if not snap.founded or ledger or placing or I.UI.getMode() then return clearLabels() end
+    if quietUi or not snap.founded or ledger or placing or I.UI.getMode() then return clearLabels() end
     local screen = hudSize()
     local cam = camera.getPosition()
     local items = {}
@@ -759,7 +760,7 @@ local function updateHover(dt)
     hoverT = hoverT - dt
     if hoverT > 0 then return end
     hoverT = 0.15
-    if not snap.founded or ledger or placing or I.UI.getMode() then return clearHover() end
+    if quietUi or not snap.founded or ledger or placing or I.UI.getMode() then return clearHover() end
     local from = camera.getPosition()
     local to = from + camera.viewportToWorldVector(v2(0.5, 0.5)) * HOVER_RANGE
     local res = nearby.castRenderingRay(from, to, { ignore = self.object })
@@ -864,6 +865,7 @@ return {
             bubbles[#bubbles + 1] = { obj = e.obj, text = e.text, untilT = core.getRealTime() + defs.utter.seconds }
         end,
         -- debug hooks (used by the scripted playtest)
+        TMW_DebugQuiet = function(on) quietUi = on end,
         TMW_DebugLedger = function(e)
             if e.open then openLedger(e.tab) else closeLedger() end
         end,

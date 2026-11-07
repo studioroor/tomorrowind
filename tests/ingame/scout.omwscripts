@@ -1,0 +1,2 @@
+GLOBAL: scripts/tomorrowind_test/scout_global.lua
+PLAYER: scripts/tomorrowind_test/scout.lua
