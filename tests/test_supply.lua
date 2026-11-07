@@ -97,11 +97,11 @@ test('short of ingots and ore: mine ore for the smelter first', function()
     eq(c.stock.ore, defs.buildings.mine.output.ore)
 end)
 
-test('no producer: idle, and the site says what it needs', function()
+test('no producer: finds something else to do, and the site says what it needs', function()
     local c, w = colony(1)
     c.stock.wood = 0
     local farm = C.addSite(c, 'farm', P(800, 0), 0, false)
-    eq(C.nextTask(c, w[1]).kind, 'idle')
+    eq(C.nextTask(c, w[1]).downtime, true)
     eq(C.siteStatus(c, farm.id), "Timber 0/6 - needs a Woodcutter's Camp")
 end)
 
@@ -167,4 +167,18 @@ test('site visuals: pilings go in while leveling', function()
     eq(C.siteVisuals(c, s.id).pilings, 0.5)
     s.progress = 30
     eq(C.siteVisuals(c, s.id).pilings, 1)
+end)
+
+test('site visuals: the building rises once materials and foundation are ready', function()
+    local c = colony(0)
+    local s = C.addSite(c, 'house', P(800, 0), 0, false, { foundation = { wood = 8, work = 20 } })
+    eq(C.siteVisuals(c, s.id).rise, nil, 'no materials yet')
+    for res in pairs(s.needs) do s.needs[res] = 0 end
+    eq(C.siteVisuals(c, s.id).rise, nil, 'still leveling')
+    s.progress = 20
+    eq(C.siteVisuals(c, s.id).rise, 0)
+    s.progress = 20 + (s.work - 20) / 2
+    eq(C.siteVisuals(c, s.id).rise, 0.5)
+    s.progress = s.work
+    eq(C.siteVisuals(c, s.id).rise, 1)
 end)

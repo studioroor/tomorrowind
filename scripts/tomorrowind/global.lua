@@ -20,13 +20,14 @@ local STEP_WATCHDOG = 150
 
 -- persistent
 local c                      -- colony state (plain table, see core/colony.lua)
-local objs = { sites = {}, workers = {}, decor = {}, threats = {}, sitefx = {}, workfx = {} }
+local objs = { sites = {}, workers = {}, decor = {}, threats = {}, sitefx = {}, workfx = {}, indoors = {} }
 local ghost                  -- { obj=, kind= } while the player is placing
 local recIds                 -- ids of our runtime records (see records.lua)
 
 -- runtime only
 local tokens = {}            -- wid -> token of the step in flight
 local stepStarted = {}       -- wid -> sim time the step was sent
+local stepLimit = {}         -- wid -> seconds before the watchdog replans
 local tokenCounter = 0
 local stateTimer, activeTimer, offscreenDt = 0, 0, 0
 local lastGameTime
@@ -37,6 +38,8 @@ local debugOn = defs.debug
 local siteByObj = {}         -- object id -> sid
 local workFxUntil = {}       -- sid -> sim time the smelter fire may go out
 local needsMigration = false
+local lastKind, lastRemark = {}, {} -- wid -> last task kind, sim time of last remark
+local awayFrom               -- what the colony had when the player left
 
 local function log(...)
     print('[Tomorrowind]', ...)
@@ -121,9 +124,19 @@ local function footprintRadius(sid)
     return defs.buildings[s.kind].footprint * 0.5
 end
 
+-- Where a site's object goes: most vanilla furniture meshes are centred
+-- on their origin, so they are lifted to stand on the ground.
+local function objectPos(sid)
+    local s = c.sites[sid]
+    local d = defs.buildings[s.kind]
+    local lift = s.built and d.lift or (d.small and defs.smallConstructionLift) or 0
+    return util.vector3(s.pos.x, s.pos.y, s.pos.z + lift)
+end
+
 local function siteScale(sid)
     local s = c.sites[sid]
     if s.built then return defs.buildings[s.kind].scale or 1 end
+    if defs.buildings[s.kind].small then return 1 end
     -- the scaffold grows with the building it stands in for
     return math.max(1, math.min(2, footprintRadius(sid) / defs.scaffoldRadius))
 end
@@ -185,7 +198,7 @@ end
 local function pilingSpots(sid)
     local s = c.sites[sid]
     local spots = {}
-    if not s.leveled then return spots end
+    if not s.leveled or defs.buildings[s.kind].small then return spots end
     local r = footprintRadius(sid) * 0.85
     local count = math.max(8, math.floor(2 * math.pi * r / 160))
     for i = 0, count - 1 do
@@ -224,18 +237,51 @@ local function removeSiteFx(sid)
     if not fx then return end
     for _, list in pairs(fx.piles or {}) do removeAll(list) end
     removeAll(fx.pilings)
+    if fx.rising and fx.rising:isValid() then fx.rising:remove() end
     objs.sitefx[sid] = nil
 end
 
+-- The building itself comes up out of the ground as the work progresses,
+-- growing to full size on the way. A static copy: the site's own object stays
+-- the scaffold until the building is done.
+local function syncRising(sid, s, d, v, fx)
+    if v.rise == nil or (d.small and not d.rises) then return end
+    local fullScale = d.scale or 1
+    local start = fx.rising == nil
+    if start then
+        -- out of sight for now: its size can only be measured next time
+        local under = objectPos(sid) - util.vector3(0, 0, 3000)
+        fx.rising = placeObject(rec().rising[s.kind], under, s.yaw, fullScale)
+        return
+    end
+    if not fx.rising:isValid() then return end
+    if not fx.riseHeight then
+        local box = fx.rising:getBoundingBox()
+        fx.riseHeight = box.halfSize.z * 2
+    end
+    local step = math.floor(v.rise * 100 / defs.rise.stepPercent)
+    if step == fx.riseStep then return end
+    fx.riseStep = step
+    local p = step * defs.rise.stepPercent / 100
+    local at = objectPos(sid)
+    local from = defs.rise.fromScale
+    fx.rising:teleport('', util.vector3(at.x, at.y, at.z - (1 - p) * fx.riseHeight),
+        { rotation = util.transform.rotateZ(s.yaw) })
+    fx.rising:setScale(fullScale * (from + (1 - from) * p))
+end
+
 -- Construction made visible: stacks of the delivered materials beside the
--- site (used up as the building goes up) and, on slopes, the pilings going
--- in one by one while the ground is leveled.
+-- site (used up as the building goes up), on slopes the pilings going in one
+-- by one while the ground is leveled, then the building rising.
 local function syncSiteFx(sid)
     local s = c.sites[sid]
     local v = s and C.siteVisuals(c, sid)
     if not v then return end
+    local d = defs.buildings[s.kind]
     local fx = objs.sitefx[sid] or { piles = {}, pilings = {} }
     objs.sitefx[sid] = fx
+    syncRising(sid, s, d, v, fx)
+    if d.small then return end
     local anchorX = footprintRadius(sid) + 110
     for res, amount in pairs(v.piles) do
         local style = defs.piles[res] or defs.piles.food
@@ -304,6 +350,15 @@ local function spawnDecor(sid)
         spawnPilings(sid, list)
     end
     objs.decor[sid] = list
+    for _, prop in ipairs(d.props or {}) do
+        local off = prop.offset or { 0, 0, 0 }
+        local rot = util.transform.rotateZ(s.yaw)
+        local p = v3(s.pos) + rot * util.vector3(off[1], off[2], off[3])
+        local o = world.createObject(prop.light or rec().decor[prop.decor])
+        o:teleport('', p, { rotation = util.transform.rotateZ(s.yaw + (prop.turn or 0)) })
+        if prop.scale then o:setScale(prop.scale) end
+        list[#list + 1] = o
+    end
     if d.decor == 'lumber' then
         -- a stack of logs beside the chopping stump, and a couple lying loose
         for i = 1, 20 do
@@ -349,10 +404,12 @@ local function setSiteObject(sid)
     local s = c.sites[sid]
     local old = objs.sites[sid]
     if old and old:isValid() then old:remove() end
-    local recordId = s.built and rec().buildings[s.kind] or rec().construction
+    local d = defs.buildings[s.kind]
+    local recordId = (s.built and rec().buildings[s.kind])
+        or (d.small and rec().constructionSmall) or rec().construction
     -- leveled sites have their floor worked out; everything else sits on the land
     if not s.leveled then s.pos.z = landHeight(v3(s.pos)) or s.pos.z end
-    objs.sites[sid] = placeObject(recordId, s.pos, s.yaw, siteScale(sid))
+    objs.sites[sid] = placeObject(recordId, objectPos(sid), s.yaw, siteScale(sid))
     removeDecor(sid)
     if s.built then
         spawnDecor(sid)
@@ -376,6 +433,44 @@ local function slotAngle(wid, sid)
     return (n % 5) * 0.9 - 1.8
 end
 
+-- Tents: routes don't go through their doors, so settlers walk via a
+-- waypoint in front of the door (always on the local -y side). This returns
+-- the built tent a position is inside, if any.
+local function tentAround(pos)
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built and defs.buildings[s.kind].hollow then
+            local d = util.vector2(pos.x - s.pos.x, pos.y - s.pos.y):length()
+            if d < siteRadius(sid) * 0.9 then return sid end
+        end
+    end
+end
+
+-- Points on the tent's door line: `outward` of its radius from the middle.
+local function tentDoor(sid, outward)
+    local s = c.sites[sid]
+    local out = util.transform.rotateZ(s.yaw) * util.vector3(0, -siteRadius(sid) * outward, 0)
+    local p = v3(s.pos) + out
+    return util.vector3(p.x, p.y, landHeight(p) or s.pos.z)
+end
+
+-- The waypoints between two places when a tent wall is in the way: routes
+-- lead to the front of the door, and settlers step through it in a straight
+-- line. `inside` tells the worker its destination is under a tent roof.
+local function tentRoute(from, to)
+    if from == to then return nil, to ~= nil end
+    local via = {}
+    if from then
+        via[#via + 1] = { pos = tentDoor(from, 0.55), straight = true }
+        via[#via + 1] = { pos = tentDoor(from, 1.35), straight = true }
+    end
+    if to then
+        via[#via + 1] = { pos = tentDoor(to, 1.35) }
+        via[#via + 1] = { pos = tentDoor(to, 0.55), straight = true }
+    end
+    return via, to ~= nil
+end
+
 -- Sends the worker's current step. `moveTo` (optional) is a position the
 -- worker must be moved to first (stuck recovery). Position and facing are
 -- applied in a single teleport: OpenMW rejects a second teleport of the
@@ -393,7 +488,20 @@ local function sendStep(wid, moveTo)
     msg.token = tokenCounter
     if st.tool then msg.tool = rec().tools[st.tool] end
     local w = c.workers[wid]
-    msg.carryModel = w.carry and defs.carryModels[w.carry.res] or nil
+    msg.carryModel = (w.carry and defs.carryModels[w.carry.res]) or (st.prop and defs.propModels[st.prop]) or nil
+    stepLimit[wid] = math.max(STEP_WATCHDOG, (st.duration or 0) + 60)
+
+    -- sleeping indoors: the settler simply isn't around until morning
+    if objs.indoors[wid] then
+        objs.indoors[wid] = nil
+        o.enabled = true
+    end
+    if st.inside then
+        objs.indoors[wid] = c.time + (st.duration or 0)
+        o:sendEvent('TMW_Stop')
+        o.enabled = false
+        return
+    end
     if st.op == 'fight' then
         -- guards go for the nearest enemy
         local best, bestD
@@ -410,14 +518,29 @@ local function sendStep(wid, moveTo)
     local s = c.sites[sid]
     if s then
         msg.center = v3(s.pos)
-        msg.standoff = siteRadius(sid) * 0.8 + 60
+        -- around the building to come, not just its scaffold
+        local radius = s.built and siteRadius(sid) or math.max(siteRadius(sid), footprintRadius(sid))
+        msg.standoff = radius * 0.8 + 60
         msg.slotAngle = slotAngle(wid, sid)
+        if st.meet then
+            -- settlers meeting up: a spot beside the building
+            local r = radius + 150
+            local spot = v3(s.pos) + util.vector3(math.sin(st.meet) * r, math.cos(st.meet) * r, 0)
+            msg.center = util.vector3(spot.x, spot.y, landHeight(spot) or s.pos.z)
+            msg.standoff, msg.slotAngle = 50, 0
+        end
+        if st.with then msg.faceObj = objs.workers[st.with] end
+        if st.op == 'goto' then
+            local from, to = tentAround(moveTo or o.position), tentAround(msg.center)
+            msg.via, msg.inside = tentRoute(from, to)
+        end
     end
 
     if st.op == 'work' and s then
         local d = defs.buildings[s.kind]
-        msg.sound = s.built and d.sound or (not s.built and defs.buildSound) or nil
-        if s.built and d.workFx then workFxOn(sid, (st.duration or 5) + 3) end
+        -- real work sounds like the place; tidying up sounds like a mallet
+        msg.sound = (s.built and st.effect and d.sound) or defs.buildSound
+        if s.built and st.effect and d.workFx then workFxOn(sid, (st.duration or 5) + 3) end
     end
 
     local pos = moveTo or o.position
@@ -427,18 +550,52 @@ local function sendStep(wid, moveTo)
         local dir = v3(s.pos) - pos
         opts = { rotation = util.transform.rotateZ(math.atan2(dir.x, dir.y)) }
     end
+    local lying = st.op == 'sleep' and st.onBed and s
+    if lying then
+        -- lie down on the bed; on waking, get up beside it
+        local d = defs.buildings[s.kind]
+        local rot = util.transform.rotateZ(s.yaw)
+        pos = v3(s.pos) + util.vector3(0, 0, d.sleepZ or 40)
+        opts = { rotation = util.transform.rotateZ(s.yaw + (defs.sleepYaw or 0)) }
+        msg.wakeAt = v3(s.pos) + rot * util.vector3(0, -(siteRadius(sid) + 70), 10)
+    end
     if moveTo or opts then
         opts = opts or {}
-        opts.onGround = moveTo ~= nil
+        opts.onGround = moveTo ~= nil and not lying
         local ok, err = pcall(o.teleport, o, o.cell, pos, opts)
         if not ok then log('teleport failed for', wid, err) end
     end
     o:sendEvent('TMW_Step', msg)
 end
 
+-- Now and then a settler remarks on what they're about to do.
+local function maybeRemark(wid, task)
+    local kindChanged = lastKind[wid] ~= task.kind
+    lastKind[wid] = task.kind
+    local lines = defs.utter.lines[task.label] or defs.utter.lines[task.kind]
+    if not kindChanged or not lines or math.random() > defs.utter.chance then return end
+    if c.time - (lastRemark[wid] or -1000) < defs.utter.cooldown then return end
+    local w, o = c.workers[wid], objs.workers[wid]
+    if w.prisoner or not o or not o:isValid() or objs.indoors[wid] then return end
+    lastRemark[wid] = c.time
+    o:sendEvent('TMW_Say', {
+        text = lines[math.random(#lines)],
+        voice = task.kind == 'shelter' and 'alarm' or (math.random() < defs.utter.voiceChance and 'grunt') or nil,
+    })
+end
+
 local function startNextTask(wid)
-    C.nextTask(c, wid)
+    local task = C.nextTask(c, wid)
     sendStep(wid)
+    maybeRemark(wid, task)
+end
+
+-- A settler said something: the player sees it as a bubble over their head.
+local function onUtter(e)
+    local p = player()
+    if p and e.actor and e.actor:isValid() then
+        p:sendEvent('TMW_Bubble', { obj = e.actor, text = e.text })
+    end
 end
 
 -- Dress a settler for their job: the colony shirt plus job gear. Old job
@@ -515,12 +672,36 @@ local function processEvents()
             spawnWorker()
         elseif e.kind == 'site_placed' then
             setSiteObject(e.site)
+            -- new work: those just pottering about get to it
+            for _, wid in ipairs(c.workerOrder) do
+                local w = c.workers[wid]
+                if w.task and w.task.downtime and not w.prisoner and C.workerPeriod(c, wid) == 'work' then
+                    C.cancelTask(c, wid)
+                    tokens[wid] = nil
+                    local o = objs.workers[wid]
+                    if o and o:isValid() then o:sendEvent('TMW_Stop') end
+                end
+            end
+        elseif e.kind == 'retask' then
+            local o = objs.workers[e.wid]
+            if o and o:isValid() and c.workers[e.wid] then
+                o:sendEvent('TMW_Stop')
+                sendStep(e.wid)
+            end
         elseif e.kind == 'built' then
             setSiteObject(e.site)
             log('built', e.site, c.sites[e.site].kind)
         elseif e.kind == 'site_removed' then
             local o = objs.sites[e.site]
-            if o and o:isValid() then o:remove() end
+            if o and o:isValid() then
+                -- what was in a chest goes to the player, not into thin air
+                if types.Container.objectIsInstance(o) and player() then
+                    local inv = types.Container.inventory(o)
+                    inv:resolve()
+                    for _, item in ipairs(inv:getAll()) do item:moveInto(types.Actor.inventory(player())) end
+                end
+                o:remove()
+            end
             objs.sites[e.site] = nil
             removeDecor(e.site)
             removeSiteFx(e.site)
@@ -545,6 +726,7 @@ local function snapshot()
         beds = C.beds(c), pop = C.population(c), pending = c.pendingArrivals,
         prisoners = C.prisonerCount(c), cells = (C.cells(c)),
         underAttack = C.underAttack(c),
+        hour = c.hourOfDay, period = C.period(c),
         workers = {}, sites = {}, options = {},
         storePos = c.storehouse and v3(c.sites[c.storehouse].pos),
     }
@@ -570,6 +752,7 @@ local function snapshot()
             built = s.built, status = C.siteStatus(c, sid),
             progress = C.siteProgress(c, sid),
             pos = v3(s.pos), radius = siteRadius(sid),
+            obj = objs.sites[sid], yaw = s.yaw, small = defs.buildings[s.kind].small,
         }
     end
     for _, opt in ipairs(C.assignmentOptions(c)) do
@@ -637,6 +820,36 @@ checkThreats = function()
     processEvents()
 end
 
+-- When the player comes back, tell them what happened while they were away.
+local function noteAway(anyActive)
+    if not anyActive then
+        if not awayFrom then
+            awayFrom = { time = c.time, stock = {}, built = 0 }
+            for _, r in ipairs(defs.resourceOrder) do awayFrom.stock[r] = c.stock[r] end
+            for _, sid in ipairs(c.siteOrder) do
+                if c.sites[sid].built then awayFrom.built = awayFrom.built + 1 end
+            end
+        end
+        return
+    end
+    if not awayFrom then return end
+    local was = awayFrom
+    awayFrom = nil
+    if c.time - was.time < defs.awaySummaryAfter then return end
+    local parts = {}
+    for _, r in ipairs(defs.resourceOrder) do
+        local gained = math.floor(c.stock[r] - was.stock[r])
+        if gained > 0 then parts[#parts + 1] = '+' .. gained .. ' ' .. defs.resources[r].name end
+    end
+    local built = -was.built
+    for _, sid in ipairs(c.siteOrder) do
+        if c.sites[sid].built then built = built + 1 end
+    end
+    if built > 0 then parts[#parts + 1] = built .. (built == 1 and ' new building' or ' new buildings') end
+    log('back after', math.floor(c.time - was.time), 's away:', table.concat(parts, ', '))
+    if #parts > 0 then message('While you were away: ' .. table.concat(parts, ', ') .. '.') end
+end
+
 local function updateWorkers(dt)
     offscreenDt = offscreenDt + dt
     activeTimer = activeTimer + dt
@@ -649,18 +862,28 @@ local function updateWorkers(dt)
         if not c.sites[sid].built then syncSiteFx(sid) end
     end
     local active = activeSet()
+    local anyActive = false
     for _, wid in ipairs(c.workerOrder) do
         local w = c.workers[wid]
         local o = objs.workers[wid]
         local isActive = o and o:isValid() and active[o.id]
-        if isActive then
+        anyActive = anyActive or isActive
+        local wakeAt = objs.indoors[wid]
+        if wakeAt then
+            -- asleep indoors: wakes in the morning, or when the task was
+            -- cancelled (alarm, time skip)
+            if not w.task or c.time >= wakeAt then
+                if w.task then C.completeStep(c, wid) end
+                startNextTask(wid)
+            end
+        elseif isActive then
             if w.offscreen then
                 w.offscreen = false
                 tokens[wid] = nil
             end
             if not tokens[wid] or not w.task then
                 startNextTask(wid)
-            elseif c.time - (stepStarted[wid] or c.time) > STEP_WATCHDOG then
+            elseif c.time - (stepStarted[wid] or c.time) > (stepLimit[wid] or STEP_WATCHDOG) then
                 log('watchdog: replanning', wid)
                 startNextTask(wid)
             end
@@ -673,11 +896,26 @@ local function updateWorkers(dt)
             C.simulateWorker(c, wid, offscreenDt)
         end
     end
+    if #c.workerOrder > 0 then noteAway(anyActive) end
     offscreenDt = 0
+end
+
+-- The colony board stands by the storehouse.
+local function addBoard()
+    local store = c.sites[c.storehouse]
+    local rot = util.transform.rotateZ(store.yaw)
+    local p = v3(store.pos) + rot * util.vector3(siteRadius(c.storehouse) + 60, -siteRadius(c.storehouse) * 0.7, 0)
+    local s = C.addSite(c, 'board', plain(p), store.yaw, true)
+    setSiteObject(s.id)
 end
 
 -- Older saves: buildings whose model changed get their new look.
 local function migrateSites()
+    local hasBoard = false
+    for _, sid in ipairs(c.siteOrder) do
+        if c.sites[sid].kind == 'board' then hasBoard = true end
+    end
+    if not hasBoard and c.storehouse then addBoard() end
     for _, sid in ipairs(c.siteOrder) do
         local o = objs.sites[sid]
         if c.sites[sid].built and o and o:isValid() and o.recordId ~= rec().buildings[c.sites[sid].kind] then
@@ -700,17 +938,19 @@ local function onUpdate(dt)
     lastGameTime = gt
     local scale = world.getGameTimeScale()
     local expected = dt * scale / 3600
-    if hours > expected * 3 + 0.05 then
-        -- time skip (wait, rest, travel): simulate the missing work
+    local hourNow = (gt / 3600) % 24
+    local skipping = hours > expected * 3 + 0.05
+    C.setClock(c, hourNow, scale)
+    if skipping then
+        -- time skip (wait, rest, travel): simulate the working hours within it
         local skipped = hours - expected
-        local seconds = skipped * 3600 / math.max(scale, 1)
-        log(string.format('time skip of %.2f h, simulating %.0f s of work', skipped, seconds))
+        log(string.format('time skip of %.2f h', skipped))
         for _, wid in ipairs(c.workerOrder) do
             tokens[wid] = nil
-            C.simulateWorker(c, wid, seconds)
+            C.simulateWorker(c, wid, C.workSeconds(c, (hourNow - skipped) % 24, skipped, wid), true)
         end
     end
-    C.tick(c, dt, hours)
+    C.tick(c, dt, hours, skipping)
     updateWorkers(dt)
     processEvents()
 
@@ -735,6 +975,7 @@ local function found(e)
     local pos = e.pos or (p.position + util.vector3(math.sin(yaw) * 600, math.cos(yaw) * 600, 0))
     local s = C.found(c, plain(pos), yaw)
     setSiteObject(s.id)
+    addBoard()
     lastGameTime = world.getGameTime()
     message('You have founded a colony. Your first settlers are on their way.')
     log('colony founded at', pos)
@@ -750,10 +991,17 @@ local function onStepDone(e)
     if C.completeStep(c, wid) then
         sendStep(wid, e.teleport)
     else
-        C.nextTask(c, wid)
+        local task = C.nextTask(c, wid)
         sendStep(wid, e.teleport)
+        maybeRemark(wid, task)
     end
     processEvents()
+end
+
+-- A settler couldn't step through a tent door by themselves.
+local function onHop(e)
+    local a = e.actor
+    if a and a:isValid() then pcall(a.teleport, a, a.cell, e.pos, { onGround = true }) end
 end
 
 local function recordName(o)
@@ -859,7 +1107,8 @@ applyGhostMove = function()
     if not e then return end
     ghost.pending = nil
     if ghost.obj:isValid() then
-        pcall(ghost.obj.teleport, ghost.obj, '', e.pos, { rotation = util.transform.rotateZ(e.yaw or 0) })
+        local lift = defs.buildings[ghost.kind].lift or 0
+        pcall(ghost.obj.teleport, ghost.obj, '', e.pos + util.vector3(0, 0, lift), { rotation = util.transform.rotateZ(e.yaw or 0) })
     end
 end
 
@@ -932,6 +1181,45 @@ local function debugCommand(e)
         for _, o in pairs(objs.workers) do
             if o:isValid() then o:sendEvent('TMW_SetDebug', e.on) end
         end
+    elseif e.cmd == 'activate' and c then
+        -- test helper: the player uses the first site of a kind
+        for _, sid in ipairs(c.siteOrder) do
+            if c.sites[sid].kind == e.kind then
+                objs.sites[sid]:activateBy(player())
+                log('activated', e.kind)
+                break
+            end
+        end
+    elseif e.cmd == 'stash' and c then
+        -- test helper: put something in the first chest
+        for _, sid in ipairs(c.siteOrder) do
+            if c.sites[sid].kind == 'chest' then
+                world.createObject('ingred_saltrice_01', 3):moveInto(types.Container.inventory(objs.sites[sid]))
+                log('stashed in', sid)
+                break
+            end
+        end
+    elseif e.cmd == 'removekind' and c then
+        for _, sid in ipairs(c.siteOrder) do
+            if c.sites[sid].kind == e.kind then
+                C.removeSite(c, sid)
+                processEvents()
+                log('removed', e.kind)
+                break
+            end
+        end
+    elseif e.cmd == 'spawn' and c then
+        for _ = 1, e.n or 1 do spawnWorker() end
+    elseif e.cmd == 'say' and c then
+        local o = objs.workers[e.wid or c.workerOrder[1]]
+        if o then o:sendEvent('TMW_Say', { text = e.text, voice = e.voice }) end
+    elseif e.cmd == 'stripdecor' and c then
+        for _, sid in ipairs(c.siteOrder) do
+            if c.sites[sid].kind == e.kind then removeDecor(sid) end
+        end
+    elseif e.cmd == 'hour' then
+        -- test helper: run the clock forward to an hour of the day
+        world.advanceTime(((e.hour - (world.getGameTime() / 3600)) % 24))
     elseif e.cmd == 'sitestate' and c then
         -- test helper: jump a construction site to a stage of its progress
         for _, sid in ipairs(c.siteOrder) do
@@ -953,6 +1241,9 @@ local function debugCommand(e)
             local box = o and o:isValid() and o:getBoundingBox()
             local fire = objs.workfx[sid]
             local objZ = o and o:isValid() and o.position.z or -1
+            if fx and fx.rising and fx.rising:isValid() then
+                log(string.format('rising %s z=%.0f scale=%.2f step=%s', site.kind, fx.rising.position.z, fx.rising.scale, tostring(fx.riseStep)))
+            end
             log(string.format('fx %s %-10s built=%s z=%.0f land=%.0f half=%s scale=%.2f piles[%s] pilings=%d/%d decor=%d fire=%s | %s', sid, site.kind, tostring(site.built),
                 objZ, landHeight(v3(site.pos)) or -1,
                 box and tostring(box.halfSize) or '?', o and o:isValid() and o.scale or -1, table.concat(parts, ' '),
@@ -980,7 +1271,13 @@ I.Activation.addHandlerForType(types.Activator, function(obj, actor)
     if ghost and ghost.obj:isValid() and ghost.obj.id == obj.id then return false end
     local sid = siteByObj[obj.id]
     if sid and actor.type == types.Player then
-        actor:sendEvent('TMW_OpenSite', { sid = sid })
+        local site = c and c.sites[sid]
+        local d = site and defs.buildings[site.kind]
+        if d and d.opensLedger and site.built then
+            actor:sendEvent('TMW_OpenLedger')
+        elseif not (site and site.built and d.small) then
+            actor:sendEvent('TMW_OpenSite', { sid = sid })
+        end
         return false
     end
 end)
@@ -999,6 +1296,14 @@ return {
             objs.threats = objs.threats or {}
             objs.sitefx = objs.sitefx or {}
             objs.workfx = objs.workfx or {} -- fires go out on the next update
+            -- tasks don't survive a reload: everyone who was asleep indoors gets up
+            for wid in pairs(objs.indoors or {}) do
+                local o = objs.workers[wid]
+                if o and o:isValid() then o.enabled = true end
+            end
+            objs.indoors = {}
+            -- saves clamp scales: rising buildings get theirs back on the next step
+            for _, fx in pairs(objs.sitefx) do fx.riseStep = nil end
             workFxUntil = {}
             needsMigration = true
             recIds = data.recIds
@@ -1016,6 +1321,8 @@ return {
     eventHandlers = {
         TMW_Found = found,
         TMW_StepDone = onStepDone,
+        TMW_Hop = onHop,
+        TMW_Utter = onUtter,
         TMW_Assign = assign,
         TMW_BeginPlace = beginPlace,
         TMW_PlaceMove = placeMove,

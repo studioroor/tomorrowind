@@ -40,6 +40,27 @@ local function activatorRecord(name, model)
     return world.createRecord(types.Activator.createRecordDraft({ name = name, model = model })).id
 end
 
+-- The object type behind a building: chests open and gates swing like the
+-- real thing, everything else is an activator that opens the colony panel.
+local function buildingType(d)
+    if d.objectType == 'container' then return types.Container end
+    if d.objectType == 'door' then return types.Door end
+    return types.Activator
+end
+
+local function buildingRecord(d)
+    if d.objectType == 'container' then
+        return world.createRecord(types.Container.createRecordDraft({
+            name = d.name, model = d.model, weight = d.capacity or 200,
+        })).id
+    elseif d.objectType == 'door' then
+        local base = types.Door.records[d.template]
+        assert(base, 'missing vanilla door ' .. tostring(d.template))
+        return world.createRecord(types.Door.createRecordDraft({ template = base, name = d.name })).id
+    end
+    return activatorRecord(d.name, d.model)
+end
+
 -- A uniform piece: copy of a vanilla clothing/armour item, renamed and
 -- made valuable enough that NPC auto-equip always prefers it.
 local function uniformRecord(piece)
@@ -79,25 +100,36 @@ function R.ensure(ids)
     ids.buildings = ids.buildings or {}
     ids.decor = ids.decor or {}
     ids.uniform = ids.uniform or {}
+    ids.rising = ids.rising or {}
     for key, spec in pairs(TOOLS) do
         if not ids.tools[key] then ids.tools[key] = weaponRecord(spec) end
     end
     -- a record is remade if defs now use another model (older saves)
     for kind, d in pairs(defs.buildings) do
         local id = ids.buildings[kind]
-        local r = id and types.Activator.records[id]
+        local r = id and buildingType(d).records[id]
         if not r or not sameModel(r.model, d.model) then
-            ids.buildings[kind] = activatorRecord(d.name, d.model)
+            ids.buildings[kind] = buildingRecord(d)
         end
     end
     if not ids.construction then
         ids.construction = activatorRecord('Construction Site', defs.constructionModel)
+    end
+    if not ids.constructionSmall then
+        ids.constructionSmall = activatorRecord('Materials', defs.smallConstructionModel)
     end
     for _, piece in ipairs(uniformPieces()) do
         if not ids.uniform[piece.template] then ids.uniform[piece.template] = uniformRecord(piece) end
     end
     for key, model in pairs(defs.decorModels) do
         if not ids.decor[key] then ids.decor[key] = staticRecord(model) end
+    end
+    -- what comes up out of the ground during construction
+    for kind, d in pairs(defs.buildings) do
+        local r = ids.rising[kind] and types.Static.records[ids.rising[kind]]
+        if (not d.small or d.rises) and (not r or not sameModel(r.model, d.model)) then
+            ids.rising[kind] = staticRecord(d.model)
+        end
     end
     return ids
 end

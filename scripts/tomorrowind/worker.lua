@@ -22,11 +22,16 @@ local STUCK_CHECK = 2.5
 local STUCK_MOVE = 25
 local STUCK_LIMIT = 4
 local GOTO_TIMEOUT = 90
+local DOOR_CHECK = 0.7         -- walking through a tent door: seconds between checks
+local DOOR_MOVE = 15           -- moved less than this: blocked
+local SHUFFLE_WINDOW = 3.5     -- seconds between position checks
+local SHUFFLE_MOVE = 100       -- moved less than this in a window: going nowhere
 
 local wid
 local cur        -- current step (from global) + runtime fields
 local wakeT      -- prisoners: seconds until they come round
 local debugOn = defs.debug
+local lying       -- playing the sleep animation
 
 local function flat(v) return util.vector3(v.x, v.y, 0) end
 local function dist2d(a, b) return (flat(a) - flat(b)):length() end
@@ -130,16 +135,107 @@ end
 
 local handlers = {}
 
-handlers['goto'] = {
-    start = function(s)
-        s.dest = approachPoint(s.center, s.standoff or 100, s.slotAngle)
+-- Next waypoint on the way (tent doors), or the destination itself. Waypoints
+-- marked straight are walked directly, without the AI: its routes don't lead
+-- through tent doors.
+local function travelNext(s)
+    local wp = s.via and s.via[1]
+    s.walkTo = nil
+    if wp then
+        s.viaT = dist2d(self.position, wp.pos) / (wp.straight and 60 or 90) + 6
+        if wp.straight then
+            I.AI.removePackages()
+            s.walkTo = wp.pos
+        else
+            travel(wp.pos)
+        end
+    elseif s.inside then
+        -- under a tent roof: walk right up to it
+        I.AI.removePackages()
+        local away = flat(self.position) - flat(s.center)
+        local len = away:length()
+        local standoff = s.standoff or 100
+        local spot = len > 1 and (s.center + away * (standoff / len)) or s.center
+        s.viaT = dist2d(self.position, spot) / 60 + 6
+        s.walkTo = spot
+        s.finalWalk = true
+    else
         s.elapsed, s.checkT, s.stuck = 0, 0, 0
         s.lastPos = self.position
+        s.dest = approachPoint(s.center, s.standoff or 100, s.slotAngle)
         travel(s.dest)
+    end
+end
+
+-- Say something: a voice line (lips move) and/or a text bubble for the player.
+--   voice: key in defs.voice; its line's text is shown unless `text` is given
+local function speak(voice, text)
+    local rec = types.NPC.record(self)
+    local line
+    if voice and rec.race == 'dark elf' then
+        local lines = defs.voice[voice][rec.isMale and 'm' or 'f']
+        line = lines[math.random(#lines)]
+        local ok, err = pcall(core.sound.say, 'Sound\\' .. line[1], self)
+        if debugOn then print(string.format('[Tomorrowind] %s says %s ok=%s %s', tostring(wid), line[1], tostring(ok), tostring(err or ''))) end
+    end
+    local shown = text or (line and line[2])
+    if shown then core.sendGlobalEvent('TMW_Utter', { actor = self.object, text = shown }) end
+end
+
+local function hop(pos)
+    if debugOn then print(string.format('[Tomorrowind] %s hopping from %s to %s', tostring(wid), tostring(self.position), tostring(pos))) end
+    core.sendGlobalEvent('TMW_Hop', { actor = self.object, pos = pos })
+end
+
+handlers['goto'] = {
+    start = function(s)
+        s.elapsed, s.checkT, s.stuck = 0, 0, 0
+        s.lastPos = self.position
+        travelNext(s)
     end,
     update = function(s, dt)
+        if s.walkTo then
+            turnTowards(s.walkTo, dt)
+            self.controls.movement = 1
+            -- blocked in the doorway, by someone else or the frame: step past
+            s.doorT = (s.doorT or 0) + dt
+            if s.doorT >= DOOR_CHECK then
+                local moved = s.doorPos and dist2d(self.position, s.doorPos) or math.huge
+                s.doorT, s.doorPos = 0, self.position
+                if moved < DOOR_MOVE then s.viaT = 0 end
+            end
+        end
+        local wp = s.via and s.via[1]
+        local target = s.walkTo or (wp and wp.pos)
+        if target then
+            s.viaT = s.viaT - dt
+            local there = dist2d(self.position, target) < (s.walkTo and 45 or ARRIVE_DIST)
+            if there or s.viaT <= 0 then
+                s.doorPos, s.doorT = nil, 0
+                self.controls.movement = 0
+                if not there then hop(target) end
+                if s.finalWalk then return true end
+                if wp then table.remove(s.via, 1) end
+                travelNext(s)
+            end
+            return false
+        end
         s.elapsed = s.elapsed + dt
         local d = dist2d(self.position, s.dest)
+        -- routes don't see fences, and settlers can shuffle about against one
+        -- for a long time. Going nowhere for a while, they climb over: a long
+        -- detour around a wall moves steadily, so it doesn't count.
+        s.windowT = (s.windowT or 0) + dt
+        if s.windowT >= SHUFFLE_WINDOW then
+            local moved = s.windowPos and dist2d(self.position, s.windowPos) or math.huge
+            s.windowT, s.windowPos = 0, self.position
+            s.shuffling = moved < SHUFFLE_MOVE and (s.shuffling or 0) + 1 or 0
+            if s.shuffling >= 2 then
+                if debugOn then print(string.format('[Tomorrowind] %s going nowhere at %s, on to %s', tostring(wid), tostring(self.position), tostring(s.dest))) end
+                finish({ teleport = s.dest })
+                return false
+            end
+        end
         local toCenter = dist2d(self.position, s.center)
         local standoff = s.standoff or 100
         if d < ARRIVE_DIST or toCenter < standoff + 40 then
@@ -253,7 +349,64 @@ end
 handlers['take'] = pause(1.2)
 handlers['store'] = pause(1.2)
 handlers['supply'] = pause(1.5)
-handlers['eat'] = pause(4)
+handlers['eat'] = {
+    start = function(s)
+        I.AI.removePackages()
+        s.t = 0
+    end,
+    update = function(s, dt)
+        s.t = s.t + dt
+        turnTowards(s.center, dt)
+        return s.t >= (s.duration or 4)
+    end,
+}
+
+-- Free time with a furnishing: stand by it, facing it, with whatever goes
+-- with it in hand (shown like carried goods).
+handlers['interact'] = handlers['eat']
+
+-- Two settlers talking: they face each other and exchange vanilla greetings.
+handlers['chat'] = {
+    start = function(s)
+        I.AI.removePackages()
+        s.t, s.sayT = 0, 1 + math.random() * 4
+    end,
+    update = function(s, dt)
+        s.t = s.t + dt
+        local other = s.faceObj
+        if other and other:isValid() and other.enabled then turnTowards(other.position, dt) end
+        s.sayT = s.sayT - dt
+        if s.sayT <= 0 then
+            s.sayT = 7 + math.random() * 7
+            speak('chat')
+        end
+        return s.t >= (s.duration or 20)
+    end,
+}
+
+-- Lying down on a bed: the knockout animation's loop, held until morning.
+local SLEEP_GROUP = 'knockout'
+handlers['sleep'] = {
+    start = function(s)
+        I.AI.removePackages()
+        setStance(Actor.STANCE.Nothing)
+        s.t = 0
+        pcall(anim.clearAnimationQueue, self, false)
+        if anim.hasGroup(self, SLEEP_GROUP) then
+            anim.playQueued(self, SLEEP_GROUP, { startKey = 'loop start', stopKey = 'loop stop', loops = 100000 })
+        end
+        lying = true
+    end,
+    update = function(s, dt)
+        s.t = s.t + dt
+        if s.t >= (s.duration or 60) then
+            clearScripted()
+            lying = false
+            finish({ teleport = s.wakeAt })
+        end
+        return false
+    end,
+}
 
 handlers['idle'] = {
     start = function(s)
@@ -373,6 +526,11 @@ end
 
 local function stop()
     if cur then cur = nil end
+    self.controls.movement = 0
+    if lying then
+        clearScripted()
+        lying = false
+    end
     I.AI.removePackages()
     if Actor.getStance(self) ~= Actor.STANCE.Nothing then setStance(Actor.STANCE.Nothing) end
 end
@@ -478,5 +636,6 @@ return {
         TMW_SetDebug = function(on) debugOn = on end,
         TMW_TrainGuard = trainAsGuard,
         TMW_Wear = wear,
+        TMW_Say = function(e) speak(e.voice, e.text) end,
     },
 }

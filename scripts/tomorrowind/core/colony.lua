@@ -50,6 +50,79 @@ local function def(site) return defs.buildings[site.kind] end
 local function resName(res) return defs.resources[res].name end
 
 ---------------------------------------------------------------------------
+-- the day
+
+local function hourIn(h, from, to)
+    if from <= to then return h >= from and h < to end
+    return h >= from or h < to
+end
+
+-- 'work', 'free' or 'sleep' for an hour of the day.
+function C.periodAt(hour)
+    local d = defs.schedule
+    if hourIn(hour, d.sleep, d.wake) then return 'sleep' end
+    if hourIn(hour, d.workStart, d.workEnd) then return 'work' end
+    return 'free'
+end
+
+-- A settler's own hours: see defs.schedule.
+local function newSchedule()
+    local d = defs.schedule
+    local function noise() return (math.random() * 2 - 1) * d.noise end
+    local t = (math.random() * 2 - 1) * d.chronotype
+    return {
+        wake = d.wake + t + noise(),
+        workStart = d.workStart + t * 2 / 3 + noise(),
+        workEnd = d.workEnd + t * 2 / 3 + noise(),
+        sleep = d.sleep + t + noise(),
+        eatBelow = defs.hunger.eatBelow + (math.random() * 2 - 1) * d.appetite,
+    }
+end
+
+-- (older saves have no personal schedules yet)
+local function schedOf(w)
+    if not w.sched then w.sched = newSchedule() end
+    return w.sched
+end
+
+local function periodFor(w, hour)
+    local d = schedOf(w)
+    if hourIn(hour, d.sleep, d.wake) then return 'sleep' end
+    if hourIn(hour, d.workStart, d.workEnd) then return 'work' end
+    return 'free'
+end
+
+function C.workerPeriod(c, wid)
+    return periodFor(c.workers[wid], c.hourOfDay or 12)
+end
+
+function C.setClock(c, hour, timeScale)
+    c.hourOfDay = hour
+    c.timeScale = timeScale
+end
+
+function C.period(c) return C.periodAt(c.hourOfDay or 12) end
+
+-- Real (simulation) seconds in `hours` of game time.
+local function gameHours(c, hours)
+    return hours * 3600 / math.max(c.timeScale or 30, 1)
+end
+
+-- Seconds of working time within `hours` of game time starting at `start`
+-- (used when time is skipped by waiting or resting).
+--   wid: whose working time (default: the standard hours)
+function C.workSeconds(c, start, hours, wid)
+    local w = wid and c.workers[wid]
+    local steps, count = math.ceil(hours * 4), 0
+    for i = 0, steps - 1 do
+        local at = (start + i / 4) % 24
+        local period = w and periodFor(w, at) or C.periodAt(at)
+        if period == 'work' then count = count + 1 end
+    end
+    return gameHours(c, steps > 0 and hours * count / steps or 0)
+end
+
+---------------------------------------------------------------------------
 -- construction & queries
 
 function C.new()
@@ -58,6 +131,8 @@ function C.new()
         nextId = 0,
         time = 0,              -- simulation seconds
         hours = 0,             -- game hours elapsed
+        hourOfDay = 12,        -- game clock, kept current by the game layer
+        timeScale = 30,        -- game seconds per real second
         stock = copy(defs.startingStock),
         reserved = {},
         sites = {},
@@ -248,11 +323,15 @@ function C.removeSite(c, sid)
         if w.task and w.task.site == sid then C.cancelTask(c, wid) end
         if w.assignment == sid then w.assignment = nil end
     end
-    if not s.built then
+    -- furnishings can be rearranged freely: their materials always come back
+    if not s.built or def(s).small then
         for res, n in pairs(s.cost or def(s).cost) do
             local delivered = n - (s.needs[res] or 0)
             c.stock[res] = c.stock[res] + delivered
         end
+    end
+    for _, wid in ipairs(c.workerOrder) do
+        if c.workers[wid].bed == sid then c.workers[wid].bed = nil end
     end
     c.sites[sid] = nil
     for i, id in ipairs(c.siteOrder) do
@@ -273,6 +352,7 @@ function C.addWorker(c, info)
         prisoner = info.prisoner or nil,
         assignment = nil,      -- site id, 'builder', or nil (laborer)
         fed = 1,
+        sched = newSchedule(),
         task = nil,
         carry = nil,           -- { res=, amount= }
         abstractProgress = 0,
@@ -396,14 +476,106 @@ end
 
 local function storeId(c) return c.storehouse end
 
+-- With a campfire, settlers fetch their food and eat it there.
 local function eatTask(c)
     reserve(c, 'food', 1)
-    return {
-        kind = 'eat', label = 'Going to eat',
-        holds = { res = 'food', amount = 1 },
-        steps = {
+    local fire
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built and def(s).interact and def(s).interact.meal then fire = s break end
+    end
+    local task = { kind = 'eat', label = 'Going to eat', holds = { res = 'food', amount = 1 } }
+    if fire then
+        task.steps = {
+            step('goto', { to = storeId(c), label = 'Fetching some food' }),
+            step('take', { res = 'food', amount = 1, label = 'Taking some food' }),
+            step('goto', { to = fire.id, label = 'Going to eat by the campfire' }),
+            step('eat', { at = fire.id, duration = gameHours(c, defs.hunger.mealHours), label = 'Eating by the campfire' }),
+        }
+    else
+        task.steps = {
             step('goto', { to = storeId(c), label = 'Going to eat' }),
             step('eat', { label = 'Eating' }),
+        }
+    end
+    return task
+end
+
+-- The bed a settler sleeps in: they keep the same one. Real beds come first,
+-- then room in the buildings; if the colony is short of beds they squeeze
+-- into the storehouse.
+local function bedFor(c, w)
+    local used = {}
+    for _, wid in ipairs(c.workerOrder) do
+        local b = c.workers[wid].bed
+        if b and wid ~= w.id then used[b] = (used[b] or 0) + 1 end
+    end
+    local function free(sid)
+        local s = c.sites[sid]
+        return s and s.built and def(s).beds and (used[sid] or 0) < def(s).beds
+    end
+    if w.bed and free(w.bed) then return c.sites[w.bed] end
+    for _, wantReal in ipairs({ true, false }) do
+        for _, sid in ipairs(c.siteOrder) do
+            if free(sid) and (def(c.sites[sid]).sleepOn or false) == wantReal then
+                w.bed = sid
+                return c.sites[sid]
+            end
+        end
+    end
+    w.bed = nil
+    return c.sites[c.storehouse]
+end
+
+local function sleepTask(c, w)
+    local bed = bedFor(c, w)
+    local d = def(bed)
+    local seconds = gameHours(c, (schedOf(w).wake - (c.hourOfDay or 12)) % 24)
+    return {
+        kind = 'sleep', site = bed.id, label = 'Sleeping',
+        steps = {
+            step('goto', { to = bed.id, label = 'Going to bed' }),
+            step('sleep', {
+                at = bed.id, duration = seconds, onBed = d.sleepOn or nil, inside = not d.sleepOn or nil,
+                label = d.sleepOn and 'Sleeping' or ('Sleeping in the ' .. d.name),
+            }),
+        },
+    }
+end
+
+-- Free time: pick something to do among the furnishings with room left,
+-- preferring a change from last time.
+local function leisureTask(c, w)
+    local users = {}
+    for _, wid in ipairs(c.workerOrder) do
+        local t = c.workers[wid].task
+        if wid ~= w.id and t and t.kind == 'leisure' then users[t.site] = (users[t.site] or 0) + 1 end
+    end
+    local options, total = {}, 0
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        local i = s.built and def(s).interact
+        if i and (users[sid] or 0) < i.slots then
+            local weight = i.weight
+            if s.kind == w.lastLeisure then weight = weight * 0.25 end
+            options[#options + 1] = { site = s, weight = weight }
+            total = total + weight
+        end
+    end
+    if #options == 0 then return nil end
+    local pick, roll = options[1], math.random() * total
+    for _, o in ipairs(options) do
+        roll = roll - o.weight
+        if roll <= 0 then pick = o break end
+    end
+    local s, i = pick.site, def(pick.site).interact
+    w.lastLeisure = s.kind
+    local spread = 1 + (math.random() * 2 - 1) * defs.schedule.leisureSpread
+    return {
+        kind = 'leisure', site = s.id, label = i.label,
+        steps = {
+            step('goto', { to = s.id, label = 'Heading to the ' .. def(s).name }),
+            step('interact', { at = s.id, duration = gameHours(c, i.hours * spread), prop = i.prop, label = i.label }),
         },
     }
 end
@@ -501,12 +673,31 @@ local function processTask(c, w, s, speed)
     }
 end
 
+-- How many settlers are on a construction site: hauling for it or building it.
+local function crewOn(c, sid)
+    local n = 0
+    for _, wid in ipairs(c.workerOrder) do
+        local t = c.workers[wid].task
+        if t and ((t.kind == 'build' and t.site == sid) or (t.incoming and t.incoming.site == sid)) then
+            n = n + 1
+        end
+    end
+    return n
+end
+
+-- Room for one more on this site? See maxBuilders in defs.
+local function hasRoom(c, s)
+    local cap = def(s).maxBuilders
+    return not cap or crewOn(c, s.id) < cap
+end
+C.crewOn = crewOn
+
 -- Haul materials to the oldest construction site that still needs
 -- something we have in stock.
 local function haulTask(c)
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
-        if not s.built then
+        if not s.built and hasRoom(c, s) then
             for _, res in ipairs(defs.resourceOrder) do
                 local left = (s.needs[res] or 0) - (s.incoming[res] or 0)
                 local avail = C.available(c, res)
@@ -535,7 +726,7 @@ end
 local function buildTask(c, speed)
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
-        if not s.built and materialsComplete(s) then
+        if not s.built and materialsComplete(s) and hasRoom(c, s) then
             local name = def(s).name
             local leveling = s.progress < (s.levelWork or 0)
             return {
@@ -635,7 +826,7 @@ end
 local function supplyRunTask(c, speed)
     for _, sid in ipairs(c.siteOrder) do
         local site = c.sites[sid]
-        if not site.built then
+        if not site.built and hasRoom(c, site) then
             for _, res in ipairs(defs.resourceOrder) do
                 local left = (site.needs[res] or 0) - (site.incoming[res] or 0)
                 if left > 0 and C.available(c, res) <= 0 then
@@ -662,6 +853,159 @@ local function constructionWork(c, speed)
     return buildTask(c, speed) or haulTask(c) or supplyRunTask(c, speed)
 end
 
+---------------------------------------------------------------------------
+-- downtime: what settlers do with nothing to do
+
+local function between(range)
+    return range[1] + math.random() * (range[2] - range[1])
+end
+
+-- A built site of the colony, at random (not furnishings).
+local function someBuilding(c)
+    local list = {}
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built and not def(s).small then list[#list + 1] = s end
+    end
+    return list[math.random(#list)]
+end
+
+-- A building settlers can go inside: the houses, or the storehouse.
+local function someShelter(c)
+    local list = {}
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built and def(s).beds and not def(s).sleepOn then list[#list + 1] = s end
+    end
+    return #list > 0 and list[math.random(#list)] or nil
+end
+
+-- A production site with room for a helper, that needs no input.
+local function helpNeeded(c)
+    local list = {}
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        local d = def(s)
+        if s.built and d.job and d.output and not d.input and not d.guard then
+            local n = #C.assignedTo(c, sid)
+            for _, wid in ipairs(c.workerOrder) do
+                local t = c.workers[wid].task
+                if t and t.helper and t.site == sid then n = n + 1 end
+            end
+            if n < d.slots then list[#list + 1] = s end
+        end
+    end
+    return #list > 0 and list[math.random(#list)] or nil
+end
+
+local function tidyTask(c)
+    local s = someBuilding(c)
+    local name = def(s).name
+    local label = 'Tidying up around the ' .. name
+    return {
+        kind = 'tidy', label = label, site = s.id,
+        steps = {
+            step('goto', { to = s.id, label = 'Walking to the ' .. name }),
+            step('work', { at = s.id, duration = between(defs.downtime.tidySeconds), tool = defs.builderTool, label = label }),
+        },
+    }
+end
+
+local function strollTask(c)
+    local s = someBuilding(c)
+    local label = 'Taking a stroll'
+    return {
+        kind = 'stroll', label = label,
+        steps = {
+            step('goto', { to = s.id, label = label }),
+            step('idle', { at = s.id, duration = between(defs.downtime.strollSeconds), label = label }),
+        },
+    }
+end
+
+local function indoorsTask(c)
+    local s = someShelter(c)
+    if not s then return nil end
+    local name = def(s).name
+    return {
+        kind = 'indoors', label = 'Relaxing indoors', site = s.id,
+        steps = {
+            step('goto', { to = s.id, label = 'Going into the ' .. name }),
+            step('rest', { at = s.id, inside = true, duration = gameHours(c, between(defs.downtime.indoorsHours)),
+                label = 'Relaxing in the ' .. name }),
+        },
+    }
+end
+
+-- Two settlers with nothing to do meet somewhere for a talk. The other one is
+-- pulled from their own pastime: the game layer picks that up from the event.
+local function chatTask(c, w)
+    local other
+    for _, wid in ipairs(c.workerOrder) do
+        local o = c.workers[wid]
+        if wid ~= w.id and not o.prisoner and not o.offscreen and o.task and o.task.downtime and o.task.kind ~= 'chat' then
+            other = o
+            break
+        end
+    end
+    if not other then return nil end
+    local s = someBuilding(c)
+    local angle = math.random() * 2 * math.pi
+    local seconds = between(defs.downtime.chatSeconds)
+    local function forPerson(person, partner)
+        return {
+            kind = 'chat', label = 'Chatting with ' .. partner.name, site = s.id, downtime = true, i = 1,
+            steps = {
+                step('goto', { to = s.id, meet = angle, label = 'Going over to talk to ' .. partner.name }),
+                step('chat', { at = s.id, meet = angle, with = partner.id, duration = seconds, label = 'Chatting with ' .. partner.name }),
+            },
+        }
+    end
+    C.cancelTask(c, other.id)
+    other.task = forPerson(other, w)
+    emit(c, { kind = 'retask', wid = other.id })
+    return forPerson(w, other)
+end
+
+-- `period`: 'work' or 'free', which table of chances in defs.downtime to use.
+local function downtimeTask(c, w, period, speed)
+    local chances = defs.downtime[period]
+    local makers = {
+        helping = function()
+            local p = helpNeeded(c)
+            return p and helperGather(c, p, speed, nil)
+        end,
+        tidy = function() return tidyTask(c) end,
+        chat = function() return chatTask(c, w) end,
+        stroll = function() return strollTask(c) end,
+        leisure = function() return leisureTask(c, w) end,
+        indoors = function() return indoorsTask(c) end,
+    }
+    -- try the options in a random order weighted by their chances
+    local options, total = {}, 0
+    for name, weight in pairs(chances) do
+        options[#options + 1] = { name = name, weight = weight }
+        total = total + weight
+    end
+    table.sort(options, function(a, b) return a.name < b.name end) -- pairs order isn't stable
+    while #options > 0 do
+        local roll = math.random() * total
+        local at = #options
+        for i, o in ipairs(options) do
+            roll = roll - o.weight
+            if roll <= 0 then at = i break end
+        end
+        local o = table.remove(options, at)
+        total = total - o.weight
+        local task = makers[o.name]()
+        if task then
+            task.downtime = true
+            return task
+        end
+    end
+    return idleTask(c, 'Taking it easy', 20)
+end
+
 -- Plan the next task for a free worker and remember it on the worker.
 function C.nextTask(c, wid)
     local w = c.workers[wid]
@@ -671,15 +1015,22 @@ function C.nextTask(c, wid)
 
     local attacked = C.underAttack(c)
     local guard = isGuard(c, w)
+    local period = C.workerPeriod(c, wid)
+    local offDuty = not guard and not w.prisoner
     if attacked and guard then
         task = fightTask(c, w)
     elseif attacked and not w.prisoner then
         task = shelterTask(c)
-    elseif w.fed < defs.hunger.eatBelow and C.available(c, 'food') >= 1 then
+    elseif period == 'sleep' and offDuty then
+        task = sleepTask(c, w)
+    elseif (w.fed < schedOf(w).eatBelow or (period == 'free' and offDuty and w.fed < defs.hunger.mealBelow))
+        and C.available(c, 'food') >= 1 then
         task = eatTask(c)
-    elseif w.prisoner and not (w.assignment and c.sites[w.assignment]) then
+    elseif w.prisoner and (period ~= 'work' or not (w.assignment and c.sites[w.assignment])) then
         local _, stockade = C.cells(c)
         task = idleTask(c, 'Locked up', 15, stockade)
+    elseif period == 'free' and offDuty then
+        task = downtimeTask(c, w, 'free', math.max(C.speed(c, wid), 0.1))
     else
         local speed = C.speed(c, wid)
         if speed <= 0 then
@@ -695,9 +1046,11 @@ function C.nextTask(c, wid)
                     task = gatherTask(c, w, s, speed)
                 end
             elseif w.assignment == 'builder' then
-                task = constructionWork(c, speed) or idleTask(c, 'Waiting for construction work', 10)
+                task = constructionWork(c, speed) or downtimeTask(c, w, 'work', speed)
+            elseif w.prisoner then
+                task = idleTask(c, 'Locked up', 15)
             else
-                task = constructionWork(c, speed) or idleTask(c, 'Idle', 15)
+                task = constructionWork(c, speed) or downtimeTask(c, w, 'work', speed)
             end
         end
     end
@@ -742,8 +1095,12 @@ local function applyStep(c, w, st)
             task.incoming = nil
         end
     elseif st.op == 'eat' then
-        unreserve(c, 'food', 1)
-        c.stock.food = c.stock.food - 1
+        if w.carry and w.carry.res == 'food' then
+            w.carry = nil -- brought along to the campfire
+        else
+            unreserve(c, 'food', 1)
+            c.stock.food = c.stock.food - 1
+        end
         w.fed = 1
         task.holds = nil
     elseif st.op == 'work' then
@@ -796,18 +1153,27 @@ end
 
 -- Advance colony-wide state: hunger, newcomers.
 --   dt: simulation seconds, hours: game hours passed in the same period
-function C.tick(c, dt, hours)
+--   skipping: time was skipped (waiting, resting): settlers eat on their own
+function C.tick(c, dt, hours, skipping)
     c.time = c.time + dt
     c.hours = c.hours + hours
 
     for _, wid in ipairs(c.workerOrder) do
         local w = c.workers[wid]
         local before = w.fed
-        w.fed = math.max(0, w.fed - hours * defs.hunger.decayPerHour)
-        if w.offscreen and w.fed < defs.hunger.eatBelow and C.available(c, 'food') >= 1 then
-            c.stock.food = c.stock.food - 1
-            w.fed = 1
-        end
+        local sleeper = not isGuard(c, w) and not w.prisoner
+        local left, at = hours, ((c.hourOfDay or 12) - hours) % 24
+        repeat
+            local chunk = math.min(left, 0.5)
+            local rate = defs.hunger.decayPerHour
+            if sleeper and periodFor(w, at) == 'sleep' then rate = rate * defs.hunger.asleepFactor end
+            w.fed = math.max(0, w.fed - chunk * rate)
+            if (w.offscreen or skipping) and w.fed < defs.hunger.eatBelow and C.available(c, 'food') >= 1 then
+                c.stock.food = c.stock.food - 1
+                w.fed = 1
+            end
+            left, at = left - chunk, (at + chunk) % 24
+        until left <= 1e-9
         if before > 0 and w.fed <= 0 then
             emit(c, { kind = 'msg', text = w.name .. ' is starving.' })
         end
@@ -828,10 +1194,12 @@ end
 
 -- Abstract simulation for a worker that is not physically simulated
 -- (player far away, or a time skip). Uses the same rates as real work.
-function C.simulateWorker(c, wid, dt)
+--   anyTime: dt is already working time (see workSeconds)
+function C.simulateWorker(c, wid, dt, anyTime)
     local w = c.workers[wid]
     if not w then return end
     if w.task then C.cancelTask(c, wid) end
+    if not anyTime and C.workerPeriod(c, wid) ~= 'work' and not isGuard(c, w) then return end
     local speed = C.speed(c, wid)
     if speed <= 0 then return end
 
@@ -905,7 +1273,11 @@ function C.workerStatus(c, wid)
     if not w then return '' end
     local st = C.currentStep(c, wid)
     if st and st.label then return st.label end
-    if w.offscreen then return 'Working (away)' end
+    if w.offscreen then
+        local period = C.workerPeriod(c, wid)
+        if isGuard(c, w) or period == 'work' then return 'Working (away)' end
+        return period == 'sleep' and 'Sleeping (away)' or 'Off duty (away)'
+    end
     return 'Idle'
 end
 
@@ -972,10 +1344,11 @@ function C.siteStatus(c, sid)
         if s.stalled then txt = txt .. ' - ' .. s.stalled end
         return txt
     end
-    if d.beds then return d.beds .. ' beds' end
+    if d.beds then return d.beds == 1 and '1 bed' or (d.beds .. ' beds') end
     if d.cells then
         return string.format('%d/%d prisoners (all cells)', C.prisonerCount(c), (C.cells(c)))
     end
+    if d.small then return d.desc or '' end
     return 'Built'
 end
 
@@ -987,8 +1360,9 @@ end
 
 -- What a construction site should show physically: how much of each
 -- delivered material is still lying there (it is used up as building work
--- progresses), and how far the foundation pilings have gone in (0..1,
--- they go in while the ground is leveled). nil for finished buildings.
+-- progresses), how far the foundation pilings have gone in (0..1, they go in
+-- while the ground is leveled) and how far the building itself has risen
+-- (0..1, nil before it starts). nil for finished buildings.
 function C.siteVisuals(c, sid)
     local s = c.sites[sid]
     if not s or s.built then return nil end
@@ -1001,6 +1375,10 @@ function C.siteVisuals(c, sid)
     end
     local level = s.levelWork or 0
     if level > 0 then v.pilings = math.min(1, s.progress / level) end
+    -- the building comes up once the materials are in and the ground is ready
+    if materialsComplete(s) and s.progress >= level then
+        v.rise = math.min(1, (s.progress - level) / math.max(1, work - level))
+    end
     return v
 end
 

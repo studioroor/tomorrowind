@@ -108,10 +108,21 @@ local function overviewTab()
         pop = pop .. string.format('     Prisoners: %d / %d cells', snap.prisoners or 0, snap.cells or 0)
     end
     items[#items + 1] = text(pop)
+    if snap.hour then
+        local h = math.floor(snap.hour)
+        local name = snap.period == 'work' and 'working hours'
+            or snap.period == 'free' and 'free time' or 'night'
+        items[#items + 1] = text(string.format('%02d:%02d, %s', h, math.floor((snap.hour - h) * 60), name))
+    end
     if snap.underAttack then items[#items + 1] = text('THE COLONY IS UNDER ATTACK', nil, true) end
     items[#items + 1] = gap(1, 10)
     items[#items + 1] = text('Buildings', nil, true)
+    local furnished = 0
     for _, s in ipairs(snap.sites) do
+        if s.small and s.built then furnished = furnished + 1 end
+    end
+    for _, s in ipairs(snap.sites) do
+        if s.small and s.built then goto continue end
         local r = {
             text(s.name, 190, s.id == focusSite),
             text(s.status, 300),
@@ -122,6 +133,11 @@ local function overviewTab()
             end)
         end
         items[#items + 1] = row(r)
+        ::continue::
+    end
+    if furnished > 0 then
+        items[#items + 1] = gap(1, 6)
+        items[#items + 1] = text(furnished .. ' furnishings. Look at one and press Delete to remove it.')
     end
     return items
 end
@@ -199,6 +215,24 @@ local function buildTab()
     return items
 end
 
+local function furnishTab()
+    local items = {
+        row({ text('Furnishing', 190, true), text('Materials', 230, true), text('', 240, true) }),
+    }
+    for _, kind in ipairs(defs.furnishOrder) do
+        local d = defs.buildings[kind]
+        local cost = costText(d.cost)
+        if not canAfford(d.cost) then cost = cost .. ' (short)' end
+        items[#items + 1] = row({
+            text(d.name, 190), text(cost, 230), text(d.desc or '', 240),
+            button('Place', function() startPlacing(kind) end),
+        })
+    end
+    items[#items + 1] = gap(1, 8)
+    items[#items + 1] = text('Settlers use these in their free time. Removing one gives its materials back.')
+    return items
+end
+
 local function ledgerLayout()
     local body
     if not snap.founded then
@@ -217,8 +251,11 @@ local function ledgerLayout()
             button('Workers', function() tab = 'workers'; ledger.layout = ledgerLayout(); ledger:update() end, tab == 'workers'),
             gap(),
             button('Build', function() tab = 'build'; ledger.layout = ledgerLayout(); ledger:update() end, tab == 'build'),
+            gap(),
+            button('Furnish', function() tab = 'furnish'; ledger.layout = ledgerLayout(); ledger:update() end, tab == 'furnish'),
         })
-        local content = (tab == 'workers' and workersTab()) or (tab == 'build' and buildTab()) or overviewTab()
+        local content = (tab == 'workers' and workersTab()) or (tab == 'build' and buildTab())
+            or (tab == 'furnish' and furnishTab()) or overviewTab()
         body = { tabs, gap(1, 10), col(content) }
     end
     local all = { row({ text('Colony Ledger', 400, true), button('Close', function() closeLedger() end) }), gap(1, 8) }
@@ -358,7 +395,13 @@ local function obstruction(pos, r, top, bottom)
         local to = util.vector3(pos.x + d[1], pos.y + d[2], bottom)
         local res = nearby.castRay(from, to, { collisionType = nearby.COLLISION_TYPE.World, ignore = placing.obj })
         local o = res.hit and res.hitObject
-        if o and not (placing.obj and o.id == placing.obj.id) and o.type ~= types.NPC and o.type ~= types.Creature then
+        local hollow = false
+        if o then
+            for _, s in ipairs(snap.sites or {}) do
+                if s.obj and s.obj.id == o.id and defs.buildings[s.kind].hollow then hollow = true end
+            end
+        end
+        if o and not hollow and not (placing.obj and o.id == placing.obj.id) and o.type ~= types.NPC and o.type ~= types.Creature then
             local okName, rec = pcall(function() return o.type.record(o) end)
             local name = okName and rec and rec.name
             return (name and name ~= '') and name or o.recordId
@@ -366,21 +409,42 @@ local function obstruction(pos, r, top, bottom)
     end
 end
 
+-- Does a site stop this one being placed here? Furnishings only keep clear
+-- of each other and of buildings going up: finished buildings are checked by
+-- the obstruction rays, so a lantern can stand right next to a wall.
+local function tooClose(d, pos, r, s)
+    local other = defs.buildings[s.kind]
+    if d.small then
+        if other.hollow or d.hollow then return false end
+        if placing.snapped and other.segment then return false end
+        if not other.small and s.built then return false end
+        if other.small then return dist2d(pos, s.pos) < (s.radius + r) * 0.6 end
+    end
+    return dist2d(pos, s.pos) < (s.radius + r) * 0.75
+end
+
 local function validate(pos, dt)
+    local d = defs.buildings[placing.kind]
     local r, height = ghostSize()
     placing.radius = r
-    local heights = {}
-    for _, d in ipairs(terrain.samplePoints(r)) do
-        heights[#heights + 1] = groundHeight(pos.x + d[1], pos.y + d[2])
+    local a
+    if d.small then
+        -- furnishings follow the ground under their middle: no foundations
+        a = { ok = pos.z >= -20, reason = 'under water', level = pos.z, low = pos.z, high = pos.z, depth = 0, wood = 0, work = 0 }
+    else
+        local heights = {}
+        for _, p in ipairs(terrain.samplePoints(r)) do
+            heights[#heights + 1] = groundHeight(pos.x + p[1], pos.y + p[2])
+        end
+        a = terrain.analyze(heights, height)
     end
-    local a = terrain.analyze(heights, height)
     placing.analysis = a
     if not a.ok then return false, a.reason end
     if snap.storePos and dist2d(pos, snap.storePos) > COLONY_RADIUS then
         return false, 'too far from the storehouse'
     end
     for _, s in ipairs(snap.sites or {}) do
-        if dist2d(pos, s.pos) < (s.radius + r) * 0.75 then
+        if tooClose(d, pos, r, s) then
             return false, 'too close to the ' .. s.name
         end
     end
@@ -388,7 +452,10 @@ local function validate(pos, dt)
     placing.checkT = (placing.checkT or 0) - dt
     if placing.checkT <= 0 then
         placing.checkT = 0.3
-        placing.blocker = obstruction(pos, r, a.high + 800, a.low - 50)
+        -- furnishings look only as high as they are: they fit under a tent
+        -- roof or a tree, and rays for them ignore a tent they stand in
+        local top = d.small and (a.high + math.min(height or 100, 180) + 10) or (a.high + 800)
+        placing.blocker = obstruction(pos, r, top, a.low - 50)
         -- walkable ground next to the footprint (catches water, cliffs, islands)
         local ok, nav = pcall(nearby.findNearestNavMeshPosition, pos,
             { searchAreaHalfExtents = util.vector3(r + 400, r + 400, 600) })
@@ -399,6 +466,28 @@ local function validate(pos, dt)
     return true
 end
 
+-- Walls, fences and gates snap end to end with the ones already there.
+local SNAP_RANGE = 150
+local function snapSegment(d, hit)
+    local best, bestD, bestYaw
+    for _, s in ipairs(snap.sites or {}) do
+        local other = defs.buildings[s.kind].segment
+        if other and s.yaw then
+            local axis = util.transform.rotateZ(s.yaw) * util.vector3(1, 0, 0)
+            local middle = s.pos + axis * (other.at or 0)
+            for _, side in ipairs({ -1, 1 }) do
+                local p = middle + axis * (side * (other.half + d.segment.half) - (d.segment.at or 0))
+                local dd = dist2d(p, hit)
+                if dd < SNAP_RANGE and (not bestD or dd < bestD) then best, bestD, bestYaw = p, dd, s.yaw end
+            end
+        end
+    end
+    if not best then return hit end
+    placing.snapped = true
+    placing.yaw = bestYaw
+    return util.vector3(best.x, best.y, groundHeight(best.x, best.y) or hit.z)
+end
+
 local function updatePlacing(dt)
     if input.isKeyPressed(input.KEY.Z) then placing.yaw = placing.yaw - ROTATE_SPEED * dt end
     if input.isKeyPressed(input.KEY.X) then placing.yaw = placing.yaw + ROTATE_SPEED * dt end
@@ -406,6 +495,8 @@ local function updatePlacing(dt)
     local d = defs.buildings[placing.kind]
     local hit = aimAtGround()
     local extra
+    placing.snapped = false
+    if hit and d.segment then hit = snapSegment(d, hit) end
     if hit then
         placing.valid, placing.reason = validate(hit, dt)
         local a = placing.analysis
@@ -437,12 +528,15 @@ local function updatePlacing(dt)
 end
 
 ---------------------------------------------------------------------------
--- floating progress labels above nearby construction sites
+-- floating labels: progress of the construction site you're looking at, and
+-- what settlers just said
 
-local LABEL_RANGE = 2500
+local LABEL_RANGE = 3000
+local LABEL_CONE = 0.22        -- how near the middle of the view, as part of the screen
 local labels, labelT = nil, 0
 local debugOn = defs.debug
-local labelLogT = 0
+local hoverSite              -- the furnishing being looked at (has its own panel)
+local bubbles = {}           -- list of { obj=, text=, until= }
 
 local function clearLabels()
     if labels then labels:destroy() labels = nil end
@@ -463,33 +557,66 @@ local function progressLines(site)
     return lines
 end
 
+-- Size of the HUD layer: the units UI positions are in. These are scaled
+-- units, not the pixels the camera reports (they differ on high-DPI screens).
+local function hudSize()
+    return ui.layers[ui.layers.indexOf('HUD')].size
+end
+
+-- Where a world point appears, in HUD units; nil if behind the camera.
+local function toScreen(pos, screen)
+    local v = camera.worldToViewportVector(pos)
+    if v.z <= 0 then return nil end
+    local pixels = ui.screenSize()
+    return v.x * screen.x / pixels.x, v.y * screen.y / pixels.y
+end
+
+-- The one building site nearest the middle of the view, within range.
+-- (Furnishings show their progress when you look right at them.)
+local function lookedAtSite(screen, cam)
+    if hoverSite then return nil end
+    local best, bestD, bx, by
+    for _, site in ipairs(snap.sites or {}) do
+        if not site.built and not site.small and (site.pos - cam):length() < LABEL_RANGE then
+            local x, y = toScreen(site.pos + util.vector3(0, 0, 250), screen)
+            if x then
+                local dx, dy = (x - screen.x / 2) / screen.x, (y - screen.y / 2) / screen.y
+                local d = math.sqrt(dx * dx + dy * dy)
+                if d < LABEL_CONE and (not bestD or d < bestD) then best, bestD, bx, by = site, d, x, y end
+            end
+        end
+    end
+    return best, bx, by
+end
+
 local function updateLabels(dt)
     labelT = labelT - dt
     if labelT > 0 then return end
     labelT = 0.1
     if not snap.founded or ledger or placing or I.UI.getMode() then return clearLabels() end
-    local screen = ui.screenSize()
+    local screen = hudSize()
     local cam = camera.getPosition()
     local items = {}
-    for _, site in ipairs(snap.sites or {}) do
-        if not site.built and (site.pos - cam):length() < LABEL_RANGE then
-            local v = camera.worldToViewportVector(site.pos + util.vector3(0, 0, 250))
-            labelLogT = labelLogT - 0.1
-            if debugOn and labelLogT <= 0 then
-                labelLogT = 2
-                print(string.format('[Tomorrowind] label %s: dist=%.0f viewport=%s screen=%s', site.name,
-                    (site.pos - cam):length(), tostring(v), tostring(screen)))
-            end
-            local x, y = v.x, v.y
-            if math.abs(x) <= 1.5 and math.abs(y) <= 1.5 then x, y = x * screen.x, y * screen.y end
-            if v.z > 0 and x > 0 and x < screen.x and y > 0 and y < screen.y then
-                -- keep the label readable near the screen edges
-                x = math.max(160, math.min(screen.x - 160, x))
-                y = math.max(90, y)
+    local site, x, y = lookedAtSite(screen, cam)
+    if site then
+        items[#items + 1] = {
+            template = T.boxTransparent,
+            props = { position = v2(math.max(160, math.min(screen.x - 160, x)), math.max(90, y)), anchor = v2(0.5, 1) },
+            content = ui.content({ { template = T.padding, content = ui.content({ col(progressLines(site)) }) } }),
+        }
+    end
+    local now = core.getRealTime()
+    for i = #bubbles, 1, -1 do
+        local b = bubbles[i]
+        if now > b.untilT or not b.obj:isValid() or not b.obj.enabled then
+            table.remove(bubbles, i)
+        elseif (b.obj.position - cam):length() < defs.utter.range then
+            local bx, by = toScreen(b.obj.position + util.vector3(0, 0, 150), screen)
+            if bx and bx > 0 and bx < screen.x and by > 0 and by < screen.y then
                 items[#items + 1] = {
                     template = T.boxTransparent,
-                    props = { position = v2(x, y), anchor = v2(0.5, 1) },
-                    content = ui.content({ { template = T.padding, content = ui.content({ col(progressLines(site)) }) } }),
+                    props = { position = v2(bx, by), anchor = v2(0.5, 1) },
+                    content = ui.content({ { template = T.padding, content = ui.content({ text(b.text) }) } }),
                 }
             end
         end
@@ -501,6 +628,123 @@ local function updateLabels(dt)
         labels:update()
     else
         labels = ui.create(layout)
+    end
+end
+
+---------------------------------------------------------------------------
+-- what you're looking at: settlers say what they're doing
+
+local HOVER_RANGE = 900
+local BOARD_RANGE = 600
+local BOARD_SITES, BOARD_WORKERS = 3, 11
+local hoverEl, hoverT = nil, 0
+local hoverText
+
+local function clearHover()
+    if hoverEl then hoverEl:destroy() hoverEl = nil end
+    hoverSite, hoverText = nil, nil
+end
+
+-- The colony board: the ledger's overview and workers, to read.
+local function boardContent()
+    local rows = { text('Colony Board   (activate for the ledger)', nil, true) }
+    local h = math.floor(snap.hour or 0)
+    rows[#rows + 1] = text(string.format('%02d:%02d     Settlers: %d / %d beds', h, math.floor(((snap.hour or 0) - h) * 60), snap.pop, snap.beds))
+    local stock = {}
+    for _, r in ipairs(defs.resourceOrder) do
+        stock[#stock + 1] = resLabel(r) .. ': ' .. math.floor(snap.stock[r] or 0)
+    end
+    rows[#rows + 1] = text(table.concat(stock, '    '))
+    if snap.underAttack then rows[#rows + 1] = text('THE COLONY IS UNDER ATTACK', nil, true) end
+    -- what's being built: buildings each, furnishings counted per kind
+    local building, counts, order = {}, {}, {}
+    for _, site in ipairs(snap.sites) do
+        if not site.built then
+            if site.small then
+                if not counts[site.name] then order[#order + 1] = site.name end
+                counts[site.name] = (counts[site.name] or 0) + 1
+            else
+                building[#building + 1] = site
+            end
+        end
+    end
+    if #building + #order > 0 then
+        rows[#rows + 1] = text('Being built', nil, true)
+        for i, site in ipairs(building) do
+            if i <= BOARD_SITES then rows[#rows + 1] = row({ text(site.name, 130), text(site.status, 400) }) end
+        end
+        local parts = {}
+        for _, name in ipairs(order) do parts[#parts + 1] = counts[name] .. ' ' .. name end
+        if #parts > 0 then rows[#rows + 1] = text(table.concat(parts, ', ')) end
+    end
+    rows[#rows + 1] = text('Settlers', nil, true)
+    for i, w in ipairs(snap.workers) do
+        if i <= BOARD_WORKERS then
+            rows[#rows + 1] = row({ text(w.name, 130), text((w.job:gsub(' %(.*%)', '')), 90), text(w.status, 310) })
+        end
+    end
+    if #snap.workers > BOARD_WORKERS then
+        rows[#rows + 1] = text('...and ' .. (#snap.workers - BOARD_WORKERS) .. ' more in the ledger')
+    end
+    return rows
+end
+
+local function hoverLines(id, dist)
+    for _, w in ipairs(snap.workers or {}) do
+        if w.obj and w.obj.id == id then
+            return { w.name, w.job, w.status, 'Fed ' .. math.floor((w.fed or 0) * 100 + 0.5) .. '%' }
+        end
+    end
+    for _, s in ipairs(snap.sites or {}) do
+        if s.obj and s.obj.id == id then
+            if s.kind == 'board' and s.built then
+                hoverSite = s.id
+                return dist < BOARD_RANGE and { board = true } or { s.name, 'Come closer to read it' }
+            end
+            local lines = { s.name, s.status }
+            if s.small then
+                hoverSite = s.id
+                lines[#lines + 1] = s.built and 'Delete: remove' or 'Delete: cancel'
+            end
+            return lines
+        end
+    end
+end
+
+local function updateHover(dt)
+    hoverT = hoverT - dt
+    if hoverT > 0 then return end
+    hoverT = 0.15
+    if not snap.founded or ledger or placing or I.UI.getMode() then return clearHover() end
+    local from = camera.getPosition()
+    local to = from + camera.viewportToWorldVector(v2(0.5, 0.5)) * HOVER_RANGE
+    local res = nearby.castRenderingRay(from, to, { ignore = self.object })
+    hoverSite = nil
+    local dist = res.hit and (res.hitPos - from):length() or 0
+    local lines = res.hit and res.hitObject and hoverLines(res.hitObject.id, dist)
+    if not lines then return clearHover() end
+    local key = lines.board and tostring(snap) or table.concat(lines, '|')
+    if key == hoverText then return end
+    hoverText = key
+    if debugOn then print('[Tomorrowind] hover: ' .. (lines.board and 'the board' or key)) end
+    local content = {}
+    if lines.board then
+        content = boardContent()
+    else
+        for i, l in ipairs(lines) do content[i] = text(l, nil, i == 1) end
+    end
+    local layout = {
+        layer = 'HUD',
+        template = lines.board and T.boxSolidThick or T.boxTransparent,
+        props = lines.board and { relativePosition = v2(0.5, 0.5), anchor = v2(0.5, 0.5) }
+            or { relativePosition = v2(0.5, 0.56), anchor = v2(0.5, 0) },
+        content = ui.content({ { template = T.padding, content = ui.content({ col(content) }) } }),
+    }
+    if hoverEl then
+        hoverEl.layout = layout
+        hoverEl:update()
+    else
+        hoverEl = ui.create(layout)
     end
 end
 
@@ -517,6 +761,11 @@ return {
                 end
                 return
             end
+            if key.code == input.KEY.Delete and hoverSite and not I.UI.getMode() then
+                send('TMW_RemoveSite', { sid = hoverSite })
+                clearHover()
+                return
+            end
             if key.code == LEDGER_KEY then
                 if ledger then
                     closeLedger()
@@ -528,6 +777,9 @@ return {
         onUpdate = function(dt)
             if placing and dt > 0 then updatePlacing(dt) end
             if dt > 0 then updateLabels(dt) end
+        end,
+        onFrame = function(dt)
+            if dt > 0 then updateHover(dt) end
         end,
         onLoad = function()
             placing = nil
@@ -550,6 +802,13 @@ return {
         TMW_OpenSite = function(e)
             focusSite = e.sid
             openLedger('overview')
+        end,
+        TMW_OpenLedger = function() openLedger('overview') end,
+        TMW_Bubble = function(e)
+            for i = #bubbles, 1, -1 do
+                if bubbles[i].obj.id == e.obj.id then table.remove(bubbles, i) end
+            end
+            bubbles[#bubbles + 1] = { obj = e.obj, text = e.text, untilT = core.getRealTime() + defs.utter.seconds }
         end,
         -- debug hooks (used by the scripted playtest)
         TMW_DebugLedger = function(e)

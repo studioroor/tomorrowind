@@ -24,6 +24,8 @@ name and face.
 | **K** | Open / close the Colony Ledger |
 | Activate a settler | Open their row in the ledger (job, status, Talk) |
 | Activate a building | Open the overview with that building |
+| Look at a settler | See what they're doing |
+| **Delete** | Remove the furnishing you're looking at |
 | **Z / X** | Rotate a building while placing |
 | **Enter** | Place the building |
 | **Backspace** | Cancel placement |
@@ -57,10 +59,16 @@ name and face.
   too: if ingots are short and so is ore, they mine ore first. If the colony
   has no building that makes it, the site says so ("needs a Woodcutter's Camp").
 - **Construction progress** (materials delivered, leveling and build %)
-  shows in the ledger and as a floating label above nearby sites. You can
+  shows in the ledger and over the building site you're looking at. You can
   also see it on site: delivered materials are stacked beside the scaffold
-  (logs, ore heaps, metal plates) and get used up as the building rises, and
-  on slopes the pilings go in one by one while the ground is leveled.
+  (logs, ore heaps, metal plates) and get used up, on slopes the pilings go in
+  one by one, and then the building itself comes up out of the ground, growing
+  from 80% to full size.
+- **Crews.** Buildings and furnishings take a limited number of settlers at
+  once (`maxBuilders`): 2 for a chair, 4 for a tent, no limit for a house.
+- **The Colony Board** stands by the storehouse. Look at it up close for a
+  summary of stock, what's being built and what everyone is doing. Activate it
+  for the ledger.
 - **Work has sound.** Each tool strike plays a sound for that kind of work:
   a thunk on wood, a clang on ore, the anvil at the smelter, a soft thud in
   the paddy. They are set per building in `defs.lua` (`sound = ...`).
@@ -71,7 +79,49 @@ name and face.
   a hard hat for miners, a fur cap for woodcutters, a coif for smelters, a
   smock for farmers, a cap for builders and chitin for guards.
 - Work continues while you're away or resting. Off-screen settlers are
-  simulated at the same rates.
+  simulated at the same rates, during their working hours, and you get a
+  summary when you come back.
+
+### The day
+
+| Hours | |
+|---|---|
+| 07 to 18 | Work |
+| 18 to 22, 06 to 07 | Free time: meals and whatever the colony has to offer |
+| 22 to 06 | Sleep: on a bed or bedroll if there's one free, otherwise out of sight inside a house or the storehouse |
+
+Everyone keeps their own hours around these: early birds and night owls, some
+hungrier than others. Guards keep watch around the clock, prisoners are locked
+up outside working hours, and an alarm wakes everybody. Hunger grows slower
+overnight. Change the hours in `defs.schedule`.
+
+With no construction to do, laborers and builders lend a hand at a production
+site with room left, tidy up, take a stroll, chat with each other or go inside
+for a while (`defs.downtime`). Now and then they say something when they start
+on a task (`defs.utter`), shown as a bubble over their head with a vanilla
+Dunmer sigh or grumble; chatting settlers use vanilla greetings.
+
+**Look at a settler** to see their name, job, what they're doing and how fed
+they are.
+
+### Furnishings
+
+The **Furnish** tab of the ledger has the small things that make a colony a
+home: campfires, lamp posts, paper lanterns, chairs, benches, tables,
+bookshelves, chests, bedrolls, beds, tents, fences, stone walls and gates.
+Laborers and builders make them like anything else, and removing one (look at
+it and press **Delete**) gives its materials back.
+
+- **In their free time** settlers use them: they eat and rest by the campfire,
+  read a book at the bookshelf, have a drink at the table and take breaks on
+  chairs and benches, with what they're using in hand. Each has room for so
+  many at a time.
+- **Beds and bedrolls** add a bed each, and settlers visibly sleep on them.
+- **Tents** can be walked into, and you can place furniture inside.
+- **Chests** are real containers. Removing one hands you what's in it.
+- **Fences, walls and gates** snap together end to end. Routes go around stone
+  walls and through gates, but they don't see fences: settlers who walk into
+  one climb over after a few seconds.
 
 ### Defense
 
@@ -111,9 +161,9 @@ scripts/tomorrowind/
   global.lua        connects the core to the world: spawns settlers and
                     buildings, sends each settler its next step, save/load
   worker.lua        on each settler: walk (navmesh + stuck recovery),
-                    swing tools, wait, wander; reports when a step is done
-  player.lua        ledger UI and freeform placement (raycast, slope,
-                    overlap and reachability checks)
+                    swing tools, wait, wander, sleep; reports when a step is done
+  player.lua        ledger UI, freeform placement (raycast, slope, overlap
+                    and reachability checks), hover info
 ```
 
 - **Task planning.** When a settler is free, the planner picks the most useful
@@ -136,7 +186,14 @@ tools/playtest.sh .playtest/run   # scripted in-game run (sandboxed config)
 # other scenes, same harness
 TEST_CONTENT=visuals.omwscripts  tools/playtest.sh .playtest/vis   # views for screenshots
 TEST_CONTENT=saveload.omwscripts tools/playtest.sh .playtest/sl    # save, reload, compare
+TEST_CONTENT=day.omwscripts      tools/playtest.sh .playtest/day   # a day with furnishings (engine screenshots)
+TEST_CONTENT=life.omwscripts     tools/playtest.sh .playtest/life  # board, rising, downtime, leaving, door traffic
+TEST_CONTENT=tent.omwscripts     tools/playtest.sh .playtest/tent  # doorway rays, tent floor height, views
+TEST_CONTENT=gallery.omwscripts  tools/playtest.sh .playtest/gal   # look at vanilla models
 TEST_CONTENT=probe.omwscripts    tools/playtest.sh .playtest/probe # measure model sizes
 ```
+
+`meshes/tomorrowind/` holds the tent, made from the game's own Ashlander tent
+by `tools/make_tent_meshes.py` (see the script for what it changes and why).
 
 Runs are silent: the sandbox sets the master volume to 0.

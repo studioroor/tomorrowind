@@ -120,7 +120,7 @@ test('two haulers never over-deliver thanks to reservations', function()
     eq(t1.holds.amount, 5)
     eq(t2.kind, 'haul')
     eq(t2.holds.amount, 1)
-    eq(t3.kind, 'idle', 'nothing left to haul, materials not yet in')
+    eq(t3.downtime, true, 'nothing left to haul, materials not yet in')
     runTask(c, w[1]); runTask(c, w[2])
     eq(farm.needs.wood, 0)
     eq(c.stock.wood, 94)
@@ -244,7 +244,7 @@ test('offscreen workers eat automatically during ticks', function()
     worker.offscreen = true
     local food = c.stock.food
     C.tick(c, 0, 4)
-    eq(worker.fed, 1)
+    assert(worker.fed > defs.hunger.eatBelow, "ate on the way")
     eq(c.stock.food, food - 1)
 end)
 

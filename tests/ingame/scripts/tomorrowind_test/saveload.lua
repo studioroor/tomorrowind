@@ -34,12 +34,17 @@ return {
             if hp.current < hp.base then hp.current = hp.base end
             if afterLoad then
                 afterLoad = afterLoad + dt
-                if afterLoad > 4 and not done.d1 then done.d1 = true; dbg({ cmd = 'fxdump' }) end
+                if afterLoad > 4 and not done.d1 then
+                    done.d1 = true
+                    dbg({ cmd = 'fxdump' })
+                    for _, w in ipairs(snap.workers) do log('after load', w.name, w.status, 'enabled', w.obj.enabled) end
+                    dbg({ cmd = 'hour', hour = 8 })
+                end
                 if afterLoad > 14 and not done.d2 then
                     done.d2 = true
                     dbg({ cmd = 'fxdump' })
                     log('workers after load:', snap and #snap.workers or -1)
-                    for _, w in ipairs(snap and snap.workers or {}) do log('  ', w.name, w.job, w.status) end
+                    for _, w in ipairs(snap and snap.workers or {}) do log('  ', w.name, w.job, w.status, 'enabled', w.obj.enabled) end
                 end
                 if afterLoad > 16 then log('done'); core.quit() end
                 return
@@ -47,7 +52,6 @@ return {
             once('found', 2, function() core.sendGlobalEvent('TMW_Found', { yaw = 0 }) end)
             once('setup', 5, function()
                 dbg({ cmd = 'give', amounts = { ore = 30, wood = 100, ingot = 10, food = 50 } })
-                dbg({ cmd = 'build', kind = 'lumber', pos = offset(0, -900), built = true })
                 dbg({ cmd = 'build', kind = 'smelter', pos = offset(-700, 300), built = true })
                 local spot = offset(1300, -2000)
                 dbg({ cmd = 'build', kind = 'house', pos = util.vector3(spot.x, spot.y, core.land.getHeightAt(spot, self.cell) + 150),
@@ -56,8 +60,15 @@ return {
             once('assign', 7, function()
                 core.sendGlobalEvent('TMW_Assign', { wid = snap.workers[1].id, target = siteId('smelter') })
             end)
-            once('stage', 15, function() dbg({ cmd = 'sitestate', kind = 'house', delivered = 0.8, progress = 0.1 }) end)
-            once('before', 30, function() dbg({ cmd = 'fxdump' }) end)
+            -- a building halfway out of the ground, with everyone asleep: it must come
+            -- back at the right size (saves clamp scales)
+            once('rising', 30, function() dbg({ cmd = 'build', kind = 'lumber', pos = offset(-900, -800), built = false }) end)
+            once('stage', 31, function() dbg({ cmd = 'sitestate', kind = 'lumber', delivered = 1, progress = 0.5 }) end)
+            once('night', 22, function() dbg({ cmd = 'hour', hour = 23 }) end)
+            once('before', 36, function()
+                dbg({ cmd = 'fxdump' })
+                for _, w in ipairs(snap.workers) do log('before save', w.name, w.status, 'enabled', w.obj.enabled) end
+            end)
         end,
         onSave = function() return { saved = true } end,
         onLoad = function(data)
