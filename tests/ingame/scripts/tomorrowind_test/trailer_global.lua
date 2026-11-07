@@ -17,7 +17,7 @@ return {
         -- wildlife would attack the settlers and spoil the shots
         TRL_Clean = function()
             for _, a in ipairs(world.activeActors) do
-                if a.type == types.Creature and a:isValid() then a:remove() end
+                if a.type == types.Creature and a:isValid() and a.recordId ~= 'guar_pack' then a:remove() end
             end
         end,
     },

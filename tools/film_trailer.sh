@@ -1,8 +1,9 @@
 #!/bin/bash
 # Films the trailer's raw frames with high graphics settings, in the sandboxed
-# playtest config: tools/film_trailer.sh <out-dir>. See tools/make_trailer.py.
+# playtest config: tools/film_trailer.sh <out-dir> [scene], the scene being
+# trailer (0.1, the default) or trailer2 (what's new in 0.2). See tools/make_trailer.py.
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-RES_X=1920 RES_Y=1080 MAX_SECONDS=${MAX_SECONDS:-580} SHOTS="" TEST_CONTENT=trailer.omwscripts EXTRA_SETTINGS="[General]
+RES_X=1920 RES_Y=1080 MAX_SECONDS=${MAX_SECONDS:-580} SHOTS="" TEST_CONTENT=${2:-trailer}.omwscripts EXTRA_SETTINGS="[General]
 screenshot format = jpg
 [Camera]
 viewing distance = 16000

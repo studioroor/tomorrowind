@@ -1695,7 +1695,7 @@ local function debugCommand(e)
         for res, n in pairs(e.amounts or {}) do c.stock[res] = (c.stock[res] or 0) + n end
         if e.gold then C.deposit(c, e.gold) end
     elseif e.cmd == 'build' and c then
-        local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation, variant = e.variant })
+        local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation, variant = e.variant, host = e.host })
         s.leveled, s.radius = e.leveled, e.radius
         if e.built then setSiteObject(s.id) end
         processEvents()

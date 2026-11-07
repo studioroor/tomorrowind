@@ -277,13 +277,16 @@ TEST_CONTENT=measure.omwscripts  tools/playtest.sh .playtest/size  # log sizes o
 TEST_CONTENT=tent.omwscripts     tools/playtest.sh .playtest/tent  # doorway rays, tent floor height, views
 TEST_CONTENT=gallery.omwscripts  tools/playtest.sh .playtest/gal   # look at vanilla models
 TEST_CONTENT=probe.omwscripts    tools/playtest.sh .playtest/probe # measure model sizes
+TEST_CONTENT=probe_map.omwscripts tools/playtest.sh .playtest/map Pelagiad # map trees and rocks
 ```
 
 The trailer is made here too: `tools/film_trailer.sh .playtest/take` films it
 with scripted cameras (the engine saves every frame, no screen recording), and
 `tools/make_trailer.py .playtest/take trailer/` cuts it, adding captions in
 MysticCards (OpenMW's Morrowind-style font) and sound (needs ffmpeg, Pillow and
-numpy; `--music file` replaces the generated music).
+numpy; `--music file` replaces the generated music). The 0.2 trailer, about
+what's new in that version, is `tools/film_trailer.sh .playtest/take2 trailer2`
+and `tools/make_trailer.py .playtest/take2 trailer/ --cut 0.2`.
 
 `tools/make_interiors.py` generates `Tomorrowind.omwaddon` and `interiors.lua` from
 your `Morrowind.esm` (ids and positions only, no game assets).

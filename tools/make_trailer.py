@@ -4,7 +4,11 @@
     tools/film_trailer.sh .playtest/take
     tools/make_trailer.py .playtest/take trailer/ [--music file]
 
-Writes trailer/tomorrowind-trailer-16x9.mp4 (YouTube) and -4x5.mp4 (Instagram).
+    tools/film_trailer.sh .playtest/take2 trailer2
+    tools/make_trailer.py .playtest/take2 trailer/ --cut 0.2
+
+Writes trailer/tomorrowind-trailer-16x9.mp4 (YouTube) and -4x5.mp4 (Instagram);
+the 0.2 cut (what's new in that version) writes tomorrowind-0.2-trailer-*.mp4.
 Needs ffmpeg, Pillow and numpy (the sound is mixed from the game's own effects
 and an original pad generated here; --music replaces the pad).
 
@@ -38,20 +42,39 @@ REPO = 'github.com/studioroor/tomorrowind'
 BASE = 'eq=gamma=1.12:contrast=1.05:saturation=1.18'
 EVENING = 'eq=gamma=1.55:contrast=1.03:saturation=1.15'
 NIGHT = 'eq=gamma=1.95:saturation=1.05'
-EDIT = [
-    dict(shot='dawn', start=0.5, dur=3.6, title=True),
+EDIT_01 = [
+    dict(shot='dawn', start=0.5, dur=3.6, title=True, hit=True),
     dict(shot='growth1', start=0.0, dur=4.6, rate=1.8, caption='Found a House Hlaalu colony anywhere in Morrowind'),
     dict(shot='rise', start=0.0, dur=3.6, rate=1.55, caption='Watch every building rise from the ground'),
     dict(shot='miner', start=1.5, dur=2.0, caption='Give your settlers jobs: mine, farm, chop, smelt'),
     dict(shot='smelter', start=1.5, dur=2.0, caption='Give your settlers jobs: mine, farm, chop, smelt'),
     dict(shot='carry', start=0.3, dur=2.3, caption='They haul everything themselves'),
-    dict(shot='growth2', start=0.0, dur=3.7, rate=2.0, caption='Your village grows: houses, tents, curving walls'),
+    dict(shot='growth2', start=0.0, dur=3.7, rate=2.0, hit=True, caption='Your village grows: houses, tents, curving walls'),
     dict(shot='campfire', start=1.0, dur=2.8, grade=EVENING, caption='Everyone keeps their own day: work, eat, rest, sleep'),
     dict(shot='dusk', start=1.0, dur=2.4, grade=EVENING, caption='Everyone keeps their own day: work, eat, rest, sleep'),
     dict(shot='sleep', start=1.0, dur=2.3, grade=NIGHT, caption='Everyone keeps their own day: work, eat, rest, sleep'),
-    dict(shot='attack', start=10.0, dur=3.6, caption='Guards defend the colony and take attackers prisoner'),
-    dict(shot='ending', start=0.5, dur=6.0, ending=True),
+    dict(shot='attack', start=10.0, dur=3.6, hit=True, caption='Guards defend the colony and take attackers prisoner'),
+    dict(shot='ending', start=0.5, dur=6.0, ending=True, hit=True),
 ]
+# what's new in 0.2, filmed by the trailer2 scene
+HOME = 'Walk into any house: your settlers live there'
+EDIT_02 = [
+    dict(shot='open', start=0.5, dur=3.6, title=True, hit=True),
+    dict(shot='caravan', start=3.5, dur=3.4, caption='Caravans come to trade at your market'),
+    dict(shot='stairs', start=1.5, dur=3.0, caption='Build stairs, walkways and rope bridges'),
+    dict(shot='bridge', start=0.5, dur=3.5, caption='Build stairs, walkways and rope bridges'),
+    dict(shot='move', start=0.5, dur=4.0, rate=2.0, caption='Move a building: up go the scaffolds, over it slides'),
+    dict(shot='home', start=0.5, dur=3.2, grade=EVENING, hit=True, caption=HOME),
+    dict(shot='shrine', start=1.0, dur=2.6, grade=EVENING, fire=True, caption='Furnish them: rugs, tapestries, candles, shrines'),
+    dict(shot='reader', start=1.0, dur=2.6, grade=EVENING, fire=True, caption='Furnish them: rugs, tapestries, candles, shrines'),
+    dict(shot='ending', start=0.5, dur=6.0, ending=True, hit=True),
+]
+CUTS = {
+    '0.1': dict(edit=EDIT_01, subtitle='A House Hlaalu colony builder for OpenMW', name='tomorrowind-trailer'),
+    '0.2': dict(edit=EDIT_02, subtitle="What's new in version 0.2", name='tomorrowind-0.2-trailer'),
+}
+EDIT = EDIT_01
+SUBTITLE = CUTS['0.1']['subtitle']
 CROSSFADE = 0.25
 
 
@@ -126,7 +149,7 @@ def card(kind, value, size, path):
     elif kind == 'title':
         glow_text(img, 'Tomorrowind', ImageFont.truetype(FONT, int((190 if wide else 142) * scale)), h * 0.42)
         font = ImageFont.truetype(FONT, int((54 if wide else 60) * scale))
-        lines = wrap(ImageDraw.Draw(img), 'A House Hlaalu colony builder for OpenMW', font, w * 0.86)
+        lines = wrap(ImageDraw.Draw(img), SUBTITLE, font, w * 0.86)
         panel_text(img, lines, font, h * 0.60)
     elif kind == 'ending':
         glow_text(img, 'Tomorrowind', ImageFont.truetype(FONT, int((170 if wide else 142) * scale)), h * 0.34)
@@ -323,7 +346,7 @@ def make_audio(take_log, total, out, music):
     cache = {}
     for clip, at in zip(EDIT, starts):
         name = clip['shot']
-        if name in ('campfire', 'smelter'):
+        if name in ('campfire', 'smelter') or clip.get('fire'):
             add(mix, fire[:int((clip['dur'] + 0.3) * RATE)], at, 0.5)
         # builders in the sped-up shots would be a rattle: only real-time shots
         if name in ('rise', 'miner', 'smelter'):
@@ -350,7 +373,7 @@ def make_audio(take_log, total, out, music):
     else:
         mix[:int(total * RATE)] += pad(total)[:int(total * RATE)]
         for i, clip in enumerate(EDIT):
-            if clip['shot'] in ('dawn', 'growth2', 'attack', 'ending'):
+            if clip.get('hit'):
                 hit(starts[i], mix)
     # overall fades and a safe peak
     fade_in, fade_out = int(0.8 * RATE), int(1.2 * RATE)
@@ -373,7 +396,11 @@ def main():
     ap.add_argument('out')
     ap.add_argument('--music')
     ap.add_argument('--only', choices=['16x9', '4x5'])
+    ap.add_argument('--cut', choices=sorted(CUTS), default='0.1')
     args = ap.parse_args()
+    global EDIT, SUBTITLE
+    cut = CUTS[args.cut]
+    EDIT, SUBTITLE = cut['edit'], cut['subtitle']
     frames_dir = os.path.abspath(os.path.join(args.take, 'userdata/screenshots'))
     log = os.path.join(args.take, 'stdout.log')
     names = sorted(os.listdir(frames_dir), key=lambda x: int(re.findall(r'\d+', x)[0]))
@@ -389,7 +416,7 @@ def main():
             clips = [render_clip(i, c, frames_dir, names, shots, size, tmp) for i, c in enumerate(EDIT)]
             silent = os.path.join(tmp, label + '.mp4')
             join_clips(clips, size, silent, tmp)
-            final = os.path.join(args.out, 'tomorrowind-trailer-%s.mp4' % label)
+            final = os.path.join(args.out, '%s-%s.mp4' % (cut['name'], label))
             run(['ffmpeg', '-y', '-hide_banner', '-i', silent, '-i', audio, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '256k',
                  '-shortest', '-movflags', '+faststart', final])
             print('wrote', final, '%.1f s' % total)
