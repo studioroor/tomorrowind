@@ -165,7 +165,9 @@ local VILLAGE_SITES = {
     { 'bench', -900, -220 }, { 'chair', -620, -250 }, { 'chest', -350, 170 }, { 'lamppost', -500, -180 },
     { 'lantern', -1050, -120 }, { 'lantern', -1000, 280 }, { 'lantern', -200, -500 },
 }
-local H1, H2 = { 2600, -200 }, { 2600, -1200 }
+-- far enough apart that the shortest bridge just spans the gap, resting a
+-- little way onto each roof (a house is 558 deep, the bridge 1036 long)
+local H1, H2 = { 2850, 2537 }, { 2850, 1063 }
 local HOME = { -1700, -100 } -- the house we go into: a Hlaalu house with a big room
 local MOVE_TO = { -250, -1450, 0.9 }
 
@@ -298,9 +300,9 @@ local SHOTS = {
       cam = stairsCam() },
     { name = 'bridge', prepare = 3, dur = 6, speed = 1,
       setup = function()
-          local roof = roofAt(land(H1[1] + 250, H1[2] - 120))
+          local roof = roofAt(land(H1[1] + 250, H1[2] - 219))
           bridgeFrom = roof
-          log('bridge from', roof, 'to roof', roofAt(land(H2[1] + 250, H2[2] + 120)))
+          log('bridge from', roof, 'to roof', roofAt(land(H2[1] + 250, H2[2] + 219)), 'ends at y', roof.y - 1036)
           dbg({ cmd = 'build', kind = 'ropebridge', pos = roof + v3(0, -518, 0), yaw = math.pi / 2, built = true, leveled = true })
       end,
       cam = aroundClear(function() return bridgeFrom and bridgeFrom + v3(0, -500, -40) end, 1150, 1000, 300, math.pi / 2 + 0.35, -0.5) },
