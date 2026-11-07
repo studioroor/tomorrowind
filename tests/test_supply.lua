@@ -26,14 +26,15 @@ test('short of timber: a laborer chops it and carries it straight to the site', 
     local c, w = colony(1)
     c.stock.wood = 0
     local lumber = C.addSite(c, 'lumber', P(400, 0), 0, true)
-    local farm = C.addSite(c, 'farm', P(800, 0), 0, false) -- needs 6 wood
+    local farm = C.addSite(c, 'farm', P(800, 0), 0, false)
+    local need = defs.buildings.farm.cost.wood
     local t = C.nextTask(c, w[1])
     eq(t.kind, 'gather')
     eq(t.helper, true)
     eq(t.site, lumber.id)
     eq(t.steps[3].to, farm.id, 'goes to the site, not the storehouse')
     eq(run(c, w[1]), 'goto,work,goto,supply')
-    eq(farm.needs.wood, 6 - defs.buildings.lumber.output.wood)
+    eq(farm.needs.wood, need - defs.buildings.lumber.output.wood)
     eq(c.stock.wood, 0)
 end)
 
@@ -102,7 +103,7 @@ test('no producer: finds something else to do, and the site says what it needs',
     c.stock.wood = 0
     local farm = C.addSite(c, 'farm', P(800, 0), 0, false)
     eq(C.nextTask(c, w[1]).downtime, true)
-    eq(C.siteStatus(c, farm.id), "Timber 0/6 - needs a Woodcutter's Camp")
+    eq(C.siteStatus(c, farm.id), string.format("Timber 0/%d - needs a Woodcutter's Camp", defs.buildings.farm.cost.wood))
 end)
 
 test('progress reports materials and build percentage', function()
@@ -112,13 +113,14 @@ test('progress reports materials and build percentage', function()
     local p = C.siteProgress(c, farm.id)
     eq(p.phase, 'materials')
     eq(p.materials[1].have, 0)
-    eq(p.materials[1].need, 6)
+    local need = defs.buildings.farm.cost.wood
+    eq(p.materials[1].need, need)
     farm.needs.wood = 0
     farm.progress = defs.buildings.farm.work / 2
     p = C.siteProgress(c, farm.id)
     eq(p.phase, 'building')
     eq(p.percent, 50)
-    eq(C.siteStatus(c, farm.id), 'Timber 6/6 - 50% built')
+    eq(C.siteStatus(c, farm.id), string.format('Timber %d/%d - 50%% built', need, need))
 end)
 
 test('cancelling a supply run releases the promised delivery', function()
@@ -144,7 +146,8 @@ end)
 test('site visuals: delivered materials pile up, then get used up', function()
     local c, w = colony(1)
     c.stock.wood = 30
-    local farm = C.addSite(c, 'farm', P(800, 0), 0, false) -- 6 wood, 15 work
+    local farm = C.addSite(c, 'farm', P(800, 0), 0, false)
+    farm.cost.wood, farm.needs.wood = 6, 6
     local v = C.siteVisuals(c, farm.id)
     eq(v.piles.wood, 0, 'nothing delivered yet')
     eq(v.pilings, 1, 'flat site: no pilings to drive')

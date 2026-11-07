@@ -17,6 +17,7 @@ local CAPTIVE_SCRIPT = 'scripts/tomorrowind/captive.lua'
 local STATE_INTERVAL = 0.5
 local ACTIVE_INTERVAL = 0.5
 local STEP_WATCHDOG = 150
+local SITE_INTERVAL = 0.1
 
 -- persistent
 local c                      -- colony state (plain table, see core/colony.lua)
@@ -38,6 +39,7 @@ local debugOn = defs.debug
 local siteByObj = {}         -- object id -> sid
 local workFxUntil = {}       -- sid -> sim time the smelter fire may go out
 local needsMigration = false
+local siteTimer = 0
 local lastKind, lastRemark = {}, {} -- wid -> last task kind, sim time of last remark
 local awayFrom               -- what the colony had when the player left
 
@@ -128,14 +130,21 @@ end
 -- on their origin, so they are lifted to stand on the ground.
 local function objectPos(sid)
     local s = c.sites[sid]
-    local d = defs.buildings[s.kind]
+    local d = defs.look(s.kind, s.variant)
     local lift = s.built and d.lift or (d.small and defs.smallConstructionLift) or 0
     return util.vector3(s.pos.x, s.pos.y, s.pos.z + lift)
 end
 
+-- The record behind a site's chosen model.
+local function lookRecord(kind, variant)
+    local ids = rec()
+    local byKind = ids.looks[kind]
+    return (variant and variant > 1 and byKind and byKind[variant]) or ids.buildings[kind]
+end
+
 local function siteScale(sid)
     local s = c.sites[sid]
-    if s.built then return defs.buildings[s.kind].scale or 1 end
+    if s.built then return defs.look(s.kind, s.variant).scale or 1 end
     if defs.buildings[s.kind].small then return 1 end
     -- the scaffold grows with the building it stands in for
     return math.max(1, math.min(2, footprintRadius(sid) / defs.scaffoldRadius))
@@ -247,21 +256,29 @@ end
 local function syncRising(sid, s, d, v, fx)
     if v.rise == nil or (d.small and not d.rises) then return end
     local fullScale = d.scale or 1
-    local start = fx.rising == nil
-    if start then
+    if fx.rising == nil then
         -- out of sight for now: its size can only be measured next time
         local under = objectPos(sid) - util.vector3(0, 0, 3000)
-        fx.rising = placeObject(rec().rising[s.kind], under, s.yaw, fullScale)
+        fx.rising = placeObject(rec().risingLooks[s.kind][s.variant or 1], under, s.yaw, fullScale)
+        fx.riseWait = 2
         return
     end
     if not fx.rising:isValid() then return end
-    if not fx.riseHeight then
-        local box = fx.rising:getBoundingBox()
-        fx.riseHeight = box.halfSize.z * 2
+    if fx.riseWait then
+        fx.riseWait = fx.riseWait > 1 and fx.riseWait - 1 or nil
+        return
     end
-    local step = math.floor(v.rise * 100 / defs.rise.stepPercent)
+    if not fx.riseHeight then
+        -- how far its top stands above the floor once it's up: it starts with
+        -- the top just under the ground, so all of the work shows
+        local box = fx.rising:getBoundingBox()
+        fx.riseHeight = box.center.z + box.halfSize.z - fx.rising.position.z + (d.lift or 0)
+    end
+    -- never back down, and only redraw when it moved: a step costs a bit
+    local shown = math.max(fx.riseShown or 0, v.rise)
+    local step = math.floor(shown * 100 / defs.rise.stepPercent)
     if step == fx.riseStep then return end
-    fx.riseStep = step
+    fx.riseShown, fx.riseStep = shown, step
     local p = step * defs.rise.stepPercent / 100
     local at = objectPos(sid)
     local from = defs.rise.fromScale
@@ -275,9 +292,17 @@ end
 -- by one while the ground is leveled, then the building rising.
 local function syncSiteFx(sid)
     local s = c.sites[sid]
-    local v = s and C.siteVisuals(c, sid)
-    if not v then return end
-    local d = defs.buildings[s.kind]
+    if not s or s.built then return end
+    -- work in progress counts: settlers only book it when they finish
+    local busy = 0
+    for _, wid in ipairs(c.workerOrder) do
+        local st = C.currentStep(c, wid)
+        if st and st.op == 'work' and st.effect == 'build' and st.at == sid and st.duration and stepStarted[wid] then
+            busy = busy + st.amount * math.min(1, (c.time - stepStarted[wid]) / st.duration)
+        end
+    end
+    local v = C.siteVisuals(c, sid, busy)
+    local d = defs.look(s.kind, s.variant)
     local fx = objs.sitefx[sid] or { piles = {}, pilings = {} }
     objs.sitefx[sid] = fx
     syncRising(sid, s, d, v, fx)
@@ -337,7 +362,7 @@ end
 
 local function spawnDecor(sid)
     local s = c.sites[sid]
-    local d = defs.buildings[s.kind]
+    local d = defs.look(s.kind, s.variant)
     local list = {}
     -- pilings driven during construction stay; any still missing (the site
     -- may have finished during a time skip) go in now
@@ -404,8 +429,8 @@ local function setSiteObject(sid)
     local s = c.sites[sid]
     local old = objs.sites[sid]
     if old and old:isValid() then old:remove() end
-    local d = defs.buildings[s.kind]
-    local recordId = (s.built and rec().buildings[s.kind])
+    local d = defs.look(s.kind, s.variant)
+    local recordId = (s.built and lookRecord(s.kind, s.variant))
         or (d.small and rec().constructionSmall) or rec().construction
     -- leveled sites have their floor worked out; everything else sits on the land
     if not s.leveled then s.pos.z = landHeight(v3(s.pos)) or s.pos.z end
@@ -553,7 +578,7 @@ local function sendStep(wid, moveTo)
     local lying = st.op == 'sleep' and st.onBed and s
     if lying then
         -- lie down on the bed; on waking, get up beside it
-        local d = defs.buildings[s.kind]
+        local d = defs.look(s.kind, s.variant)
         local rot = util.transform.rotateZ(s.yaw)
         pos = v3(s.pos) + util.vector3(0, 0, d.sleepZ or 40)
         opts = { rotation = util.transform.rotateZ(s.yaw + (defs.sleepYaw or 0)) }
@@ -726,7 +751,7 @@ local function snapshot()
         beds = C.beds(c), pop = C.population(c), pending = c.pendingArrivals,
         prisoners = C.prisonerCount(c), cells = (C.cells(c)),
         underAttack = C.underAttack(c),
-        hour = c.hourOfDay, period = C.period(c),
+        hour = c.hourOfDay, period = C.period(c), capacity = C.capacity(c),
         workers = {}, sites = {}, options = {},
         storePos = c.storehouse and v3(c.sites[c.storehouse].pos),
     }
@@ -752,7 +777,7 @@ local function snapshot()
             built = s.built, status = C.siteStatus(c, sid),
             progress = C.siteProgress(c, sid),
             pos = v3(s.pos), radius = siteRadius(sid),
-            obj = objs.sites[sid], yaw = s.yaw, small = defs.buildings[s.kind].small,
+            obj = objs.sites[sid], yaw = s.yaw, small = defs.buildings[s.kind].small, variant = s.variant,
         }
     end
     for _, opt in ipairs(C.assignmentOptions(c)) do
@@ -850,6 +875,16 @@ local function noteAway(anyActive)
     if #parts > 0 then message('While you were away: ' .. table.concat(parts, ', ') .. '.') end
 end
 
+-- Construction moves on a few times a second, so buildings rise smoothly.
+local function updateSites(dt)
+    siteTimer = siteTimer + dt
+    if siteTimer < SITE_INTERVAL then return end
+    siteTimer = 0
+    for _, sid in ipairs(c.siteOrder) do
+        if not c.sites[sid].built then syncSiteFx(sid) end
+    end
+end
+
 local function updateWorkers(dt)
     offscreenDt = offscreenDt + dt
     activeTimer = activeTimer + dt
@@ -858,9 +893,6 @@ local function updateWorkers(dt)
     checkDeaths()
     checkThreats()
     updateWorkFx()
-    for _, sid in ipairs(c.siteOrder) do
-        if not c.sites[sid].built then syncSiteFx(sid) end
-    end
     local active = activeSet()
     local anyActive = false
     for _, wid in ipairs(c.workerOrder) do
@@ -918,7 +950,7 @@ local function migrateSites()
     if not hasBoard and c.storehouse then addBoard() end
     for _, sid in ipairs(c.siteOrder) do
         local o = objs.sites[sid]
-        if c.sites[sid].built and o and o:isValid() and o.recordId ~= rec().buildings[c.sites[sid].kind] then
+        if c.sites[sid].built and o and o:isValid() and o.recordId ~= lookRecord(c.sites[sid].kind, c.sites[sid].variant) then
             log('updating model of', sid, c.sites[sid].kind)
             setSiteObject(sid)
         end
@@ -952,6 +984,7 @@ local function onUpdate(dt)
     end
     C.tick(c, dt, hours, skipping)
     updateWorkers(dt)
+    updateSites(dt)
     processEvents()
 
     stateTimer = stateTimer + dt
@@ -1089,10 +1122,11 @@ local function beginPlace(e)
     if not d then return end
     removeGhost()
     local p = player()
-    local o = world.createObject(rec().buildings[e.kind])
+    local look = defs.look(e.kind, e.variant)
+    local o = world.createObject(lookRecord(e.kind, e.variant))
     o:teleport(p.cell, p.position + util.vector3(0, 0, -5000))
-    if d.scale then o:setScale(d.scale) end
-    ghost = { obj = o, kind = e.kind }
+    if look.scale then o:setScale(look.scale) end
+    ghost = { obj = o, kind = e.kind, variant = e.variant }
     p:sendEvent('TMW_Ghost', { obj = o, kind = e.kind })
 end
 
@@ -1107,7 +1141,7 @@ applyGhostMove = function()
     if not e then return end
     ghost.pending = nil
     if ghost.obj:isValid() then
-        local lift = defs.buildings[ghost.kind].lift or 0
+        local lift = defs.look(ghost.kind, ghost.variant).lift or 0
         pcall(ghost.obj.teleport, ghost.obj, '', e.pos + util.vector3(0, 0, lift), { rotation = util.transform.rotateZ(e.yaw or 0) })
     end
 end
@@ -1115,8 +1149,9 @@ end
 local function placeConfirm(e)
     if not c or not ghost then return end
     local kind = ghost.kind
+    local variant = ghost.variant
     removeGhost()
-    local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, false, { foundation = e.foundation })
+    local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, false, { foundation = e.foundation, variant = variant })
     s.leveled = true -- e.pos.z is the computed floor level
     s.radius = e.radius
     processEvents()
@@ -1137,7 +1172,7 @@ local function debugCommand(e)
     if e.cmd == 'give' and c then
         for res, n in pairs(e.amounts or {}) do c.stock[res] = (c.stock[res] or 0) + n end
     elseif e.cmd == 'build' and c then
-        local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation })
+        local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation, variant = e.variant })
         s.leveled, s.radius = e.leveled, e.radius
         if e.built then setSiteObject(s.id) end
         processEvents()
@@ -1208,6 +1243,15 @@ local function debugCommand(e)
                 break
             end
         end
+    elseif e.cmd == 'risedump' and c then
+        for sid, fx in pairs(objs.sitefx) do
+            if fx.rising and fx.rising:isValid() then
+                log(string.format('rise %s shown=%.3f progress=%.1f/%.1f z=%.0f', sid, fx.riseShown or -1, c.sites[sid].progress, c.sites[sid].work, fx.rising.position.z))
+            end
+        end
+    elseif e.cmd == 'talk' and c then
+        local o = objs.workers[c.workerOrder[1]]
+        if o then o:activateBy(player()) end
     elseif e.cmd == 'spawn' and c then
         for _ = 1, e.n or 1 do spawnWorker() end
     elseif e.cmd == 'say' and c then
@@ -1257,15 +1301,7 @@ local function debugCommand(e)
 end
 
 ---------------------------------------------------------------------------
--- activation: workers and buildings open the colony panel
-
-I.Activation.addHandlerForType(types.NPC, function(obj, actor)
-    local wid = workerByObj[obj.id]
-    if wid and actor.type == types.Player then
-        actor:sendEvent('TMW_OpenWorker', { wid = wid })
-        return false
-    end
-end)
+-- activation: buildings open the colony panel (settlers just talk)
 
 I.Activation.addHandlerForType(types.Activator, function(obj, actor)
     if ghost and ghost.obj:isValid() and ghost.obj.id == obj.id then return false end

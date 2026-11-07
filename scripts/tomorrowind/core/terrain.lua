@@ -15,8 +15,9 @@ end
 
 -- heights: list of ground heights under the footprint (any order)
 -- buildingHeight: optional, raises the burial limit for tall buildings
+-- raise: optional, moves the floor up (or down) from where it would go
 -- returns { ok, reason, level, low, high, depth, burial, wood, work }
-function T.analyze(heights, buildingHeight)
+function T.analyze(heights, buildingHeight, raise)
     local cfg = defs.slope
     local low, high = math.huge, -math.huge
     for _, h in ipairs(heights) do
@@ -25,7 +26,7 @@ function T.analyze(heights, buildingHeight)
     end
     if low == math.huge then return { ok = false, reason = 'look at open ground' } end
     local spread = high - low
-    local level = low + spread * cfg.levelAt
+    local level = low + spread * cfg.levelAt + (raise or 0)
     local r = {
         low = low, high = high, level = level,
         burial = high - level,
@@ -35,7 +36,7 @@ function T.analyze(heights, buildingHeight)
     r.work = r.depth > 0 and math.ceil(r.depth * cfg.workPerUnit) or 0
     if low < -20 then
         r.ok, r.reason = false, 'under water'
-    elseif r.burial > T.maxBurial(buildingHeight) then
+    elseif r.burial > T.maxBurial(buildingHeight) and (raise or 0) >= 0 then
         r.ok, r.reason = false, 'too steep'
     else
         r.ok = true

@@ -48,17 +48,17 @@ local function buildingType(d)
     return types.Activator
 end
 
-local function buildingRecord(d)
-    if d.objectType == 'container' then
+local function buildingRecord(look)
+    if look.objectType == 'container' then
         return world.createRecord(types.Container.createRecordDraft({
-            name = d.name, model = d.model, weight = d.capacity or 200,
+            name = look.name, model = look.model, weight = look.capacity or 200,
         })).id
-    elseif d.objectType == 'door' then
-        local base = types.Door.records[d.template]
-        assert(base, 'missing vanilla door ' .. tostring(d.template))
-        return world.createRecord(types.Door.createRecordDraft({ template = base, name = d.name })).id
+    elseif look.objectType == 'door' then
+        local base = types.Door.records[look.template]
+        assert(base, 'missing vanilla door ' .. tostring(look.template))
+        return world.createRecord(types.Door.createRecordDraft({ template = base, name = look.name })).id
     end
-    return activatorRecord(d.name, d.model)
+    return activatorRecord(look.name, look.model)
 end
 
 -- A uniform piece: copy of a vanilla clothing/armour item, renamed and
@@ -100,16 +100,26 @@ function R.ensure(ids)
     ids.buildings = ids.buildings or {}
     ids.decor = ids.decor or {}
     ids.uniform = ids.uniform or {}
-    ids.rising = ids.rising or {}
     for key, spec in pairs(TOOLS) do
         if not ids.tools[key] then ids.tools[key] = weaponRecord(spec) end
     end
     -- a record is remade if defs now use another model (older saves)
+    ids.looks = ids.looks or {}
     for kind, d in pairs(defs.buildings) do
         local id = ids.buildings[kind]
         local r = id and buildingType(d).records[id]
         if not r or not sameModel(r.model, d.model) then
             ids.buildings[kind] = buildingRecord(d)
+        end
+        -- the other models to choose from
+        for i = 2, #(d.variants or {}) do
+            local look = defs.look(kind, i)
+            ids.looks[kind] = ids.looks[kind] or {}
+            local vid = ids.looks[kind][i]
+            local vr = vid and buildingType(d).records[vid]
+            if not vr or not sameModel(vr.model, look.model) then
+                ids.looks[kind][i] = buildingRecord(look)
+            end
         end
     end
     if not ids.construction then
@@ -124,11 +134,18 @@ function R.ensure(ids)
     for key, model in pairs(defs.decorModels) do
         if not ids.decor[key] then ids.decor[key] = staticRecord(model) end
     end
-    -- what comes up out of the ground during construction
+    -- what comes up out of the ground during construction, per model
+    ids.risingLooks = ids.risingLooks or {}
     for kind, d in pairs(defs.buildings) do
-        local r = ids.rising[kind] and types.Static.records[ids.rising[kind]]
-        if (not d.small or d.rises) and (not r or not sameModel(r.model, d.model)) then
-            ids.rising[kind] = staticRecord(d.model)
+        if not d.small or d.rises then
+            for i = 1, math.max(1, #(d.variants or {})) do
+                local look = defs.look(kind, i)
+                ids.risingLooks[kind] = ids.risingLooks[kind] or {}
+                local r = ids.risingLooks[kind][i] and types.Static.records[ids.risingLooks[kind][i]]
+                if not r or not sameModel(r.model, look.model) then
+                    ids.risingLooks[kind][i] = staticRecord(look.model)
+                end
+            end
         end
     end
     return ids

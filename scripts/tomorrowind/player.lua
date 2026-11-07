@@ -98,7 +98,7 @@ local function overviewTab()
     for _, r in ipairs(defs.resourceOrder) do
         local s, a = snap.stock[r] or 0, snap.available[r] or 0
         local label = resLabel(r) .. ': ' .. math.floor(s)
-        if a < s then label = label .. ' (' .. math.floor(a) .. ' free)' end
+        if (snap.capacity or 0) > 0 then label = label .. ' / ' .. snap.capacity end
         stockRow[#stockRow + 1] = text(label, 170)
     end
     items[#items + 1] = row(stockRow)
@@ -320,10 +320,24 @@ local function clearHud()
     if hud then hud:destroy() hud = nil end
 end
 
+-- Choices that carry over to the next placement of the same kind: building
+-- a curve, every segment keeps bending the same way.
+local lastCurve = {}
+
 startPlacing = function(kind)
     closeLedger()
-    placing = { kind = kind, yaw = camera.getYaw() + math.pi, valid = false, reason = 'Look at open ground', pathT = 0 }
-    send('TMW_BeginPlace', { kind = kind })
+    placing = { kind = kind, yaw = camera.getYaw() + math.pi, valid = false, reason = 'Look at open ground', pathT = 0,
+        variant = 1, raise = 0, curve = lastCurve[kind] or 0 }
+    send('TMW_BeginPlace', { kind = kind, variant = 1 })
+end
+
+-- Next or previous model for what's being placed (a new preview object).
+local function cycleVariant(dir)
+    local count = #(defs.buildings[placing.kind].variants or {})
+    if count < 2 then return end
+    placing.variant = (placing.variant - 1 + dir) % count + 1
+    placing.obj = nil
+    send('TMW_BeginPlace', { kind = placing.kind, variant = placing.variant })
 end
 
 local function stopPlacing(confirm)
@@ -344,6 +358,7 @@ local function stopPlacing(confirm)
     else
         send('TMW_PlaceCancel')
     end
+    if confirm then lastCurve[placing.kind] = placing.snapped and placing.curve or 0 end
     placing = nil
     clearHud()
 end
@@ -351,7 +366,7 @@ end
 -- Footprint radius and height of the building being placed, from the
 -- preview's bounding box (falls back to the defs footprint).
 local function ghostSize()
-    local d = defs.buildings[placing.kind]
+    local d = defs.look(placing.kind, placing.variant)
     if placing.obj and placing.obj:isValid() then
         local ok, box = pcall(placing.obj.getBoundingBox, placing.obj)
         if ok and box and box.halfSize.x > 1 and box.halfSize.x < 5000 then
@@ -398,7 +413,11 @@ local function obstruction(pos, r, top, bottom)
         local hollow = false
         if o then
             for _, s in ipairs(snap.sites or {}) do
-                if s.obj and s.obj.id == o.id and defs.buildings[s.kind].hollow then hollow = true end
+                -- a tent you're placing inside, or a wall you're joining onto
+                if s.obj and s.obj.id == o.id and (defs.buildings[s.kind].hollow
+                    or (placing.snapped and defs.look(s.kind, s.variant).segment)) then
+                    hollow = true
+                end
             end
         end
         if o and not hollow and not (placing.obj and o.id == placing.obj.id) and o.type ~= types.NPC and o.type ~= types.Creature then
@@ -416,7 +435,7 @@ local function tooClose(d, pos, r, s)
     local other = defs.buildings[s.kind]
     if d.small then
         if other.hollow or d.hollow then return false end
-        if placing.snapped and other.segment then return false end
+        if placing.snapped and defs.look(s.kind, s.variant).segment then return false end
         if not other.small and s.built then return false end
         if other.small then return dist2d(pos, s.pos) < (s.radius + r) * 0.6 end
     end
@@ -424,19 +443,20 @@ local function tooClose(d, pos, r, s)
 end
 
 local function validate(pos, dt)
-    local d = defs.buildings[placing.kind]
+    local d = defs.look(placing.kind, placing.variant)
     local r, height = ghostSize()
     placing.radius = r
     local a
     if d.small then
         -- furnishings follow the ground under their middle: no foundations
-        a = { ok = pos.z >= -20, reason = 'under water', level = pos.z, low = pos.z, high = pos.z, depth = 0, wood = 0, work = 0 }
+        local level = pos.z + placing.raise
+        a = { ok = pos.z >= -20, reason = 'under water', level = level, low = pos.z, high = pos.z, depth = 0, wood = 0, work = 0 }
     else
         local heights = {}
         for _, p in ipairs(terrain.samplePoints(r)) do
             heights[#heights + 1] = groundHeight(pos.x + p[1], pos.y + p[2])
         end
-        a = terrain.analyze(heights, height)
+        a = terrain.analyze(heights, height, placing.raise)
     end
     placing.analysis = a
     if not a.ok then return false, a.reason end
@@ -466,19 +486,25 @@ local function validate(pos, dt)
     return true
 end
 
--- Walls, fences and gates snap end to end with the ones already there.
-local SNAP_RANGE = 150
+-- Walls, fences and gates snap end to end with the ones already there, and
+-- can bend around the joint: Z and X turn the new piece around the end of the
+-- one it attaches to, so walls can curve.
+local SNAP_RANGE = 180
 local function snapSegment(d, hit)
     local best, bestD, bestYaw
+    local mine = d.segment
     for _, s in ipairs(snap.sites or {}) do
-        local other = defs.buildings[s.kind].segment
+        local other = defs.look(s.kind, s.variant).segment
         if other and s.yaw then
             local axis = util.transform.rotateZ(s.yaw) * util.vector3(1, 0, 0)
             local middle = s.pos + axis * (other.at or 0)
+            local yaw = s.yaw + placing.curve
+            local newAxis = util.transform.rotateZ(yaw) * util.vector3(1, 0, 0)
             for _, side in ipairs({ -1, 1 }) do
-                local p = middle + axis * (side * (other.half + d.segment.half) - (d.segment.at or 0))
+                local joint = middle + axis * (side * other.half)
+                local p = joint + newAxis * (side * mine.half - (mine.at or 0))
                 local dd = dist2d(p, hit)
-                if dd < SNAP_RANGE and (not bestD or dd < bestD) then best, bestD, bestYaw = p, dd, s.yaw end
+                if dd < SNAP_RANGE and (not bestD or dd < bestD) then best, bestD, bestYaw = p, dd, yaw end
             end
         end
     end
@@ -489,10 +515,16 @@ local function snapSegment(d, hit)
 end
 
 local function updatePlacing(dt)
-    if input.isKeyPressed(input.KEY.Z) then placing.yaw = placing.yaw - ROTATE_SPEED * dt end
-    if input.isKeyPressed(input.KEY.X) then placing.yaw = placing.yaw + ROTATE_SPEED * dt end
+    -- when snapped, rotating bends the new piece around the joint
+    local turn = 0
+    if input.isKeyPressed(input.KEY.Z) then turn = turn - ROTATE_SPEED * dt end
+    if input.isKeyPressed(input.KEY.X) then turn = turn + ROTATE_SPEED * dt end
+    if placing.snapped then placing.curve = placing.curve + turn else placing.yaw = placing.yaw + turn end
+    local cfg = defs.placeRaise
+    if input.isKeyPressed(input.KEY.UpArrow) then placing.raise = math.min(cfg.limit, placing.raise + cfg.speed * dt) end
+    if input.isKeyPressed(input.KEY.DownArrow) then placing.raise = math.max(-cfg.limit, placing.raise - cfg.speed * dt) end
 
-    local d = defs.buildings[placing.kind]
+    local d = defs.look(placing.kind, placing.variant)
     local hit = aimAtGround()
     local extra
     placing.snapped = false
@@ -518,10 +550,20 @@ local function updatePlacing(dt)
                 tostring(placing.analysis and placing.analysis.depth)))
         end
     end
+    local variants = defs.buildings[placing.kind].variants
     local lines = {
         text('Placing: ' .. d.name .. '   (' .. costText(d.cost) .. ')', nil, true),
-        text('Z / X rotate     Enter place     Backspace cancel'),
+        text((placing.snapped and 'Z / X bend' or 'Z / X rotate') .. '     Up / Down height     Enter place     Backspace cancel'),
     }
+    if variants then
+        lines[#lines + 1] = text(string.format('Left / Right model: %s (%d of %d)', d.label or d.name, placing.variant, #variants))
+    end
+    if placing.snapped then
+        lines[#lines + 1] = text(string.format('Joined up, bent by %d degrees', math.floor(math.deg(placing.curve) + 0.5)))
+    end
+    if math.abs(placing.raise) >= 1 then
+        lines[#lines + 1] = text(string.format('Height: %+d', math.floor(placing.raise + 0.5)))
+    end
     if extra then lines[#lines + 1] = text(extra) end
     lines[#lines + 1] = text(placing.valid and 'Good spot' or ('Cannot build: ' .. (placing.reason or '')), nil, not placing.valid)
     setHud(lines)
@@ -536,6 +578,7 @@ local LABEL_CONE = 0.22        -- how near the middle of the view, as part of th
 local labels, labelT = nil, 0
 local debugOn = defs.debug
 local hoverSite              -- the furnishing being looked at (has its own panel)
+local hoverWorker            -- the settler being looked at
 local bubbles = {}           -- list of { obj=, text=, until= }
 
 local function clearLabels()
@@ -642,7 +685,7 @@ local hoverText
 
 local function clearHover()
     if hoverEl then hoverEl:destroy() hoverEl = nil end
-    hoverSite, hoverText = nil, nil
+    hoverSite, hoverWorker, hoverText = nil, nil, nil
 end
 
 -- The colony board: the ledger's overview and workers, to read.
@@ -692,7 +735,8 @@ end
 local function hoverLines(id, dist)
     for _, w in ipairs(snap.workers or {}) do
         if w.obj and w.obj.id == id then
-            return { w.name, w.job, w.status, 'Fed ' .. math.floor((w.fed or 0) * 100 + 0.5) .. '%' }
+            hoverWorker = w.id
+            return { w.name, w.job, w.status, 'Fed ' .. math.floor((w.fed or 0) * 100 + 0.5) .. '%', 'K: job in the ledger' }
         end
     end
     for _, s in ipairs(snap.sites or {}) do
@@ -719,7 +763,7 @@ local function updateHover(dt)
     local from = camera.getPosition()
     local to = from + camera.viewportToWorldVector(v2(0.5, 0.5)) * HOVER_RANGE
     local res = nearby.castRenderingRay(from, to, { ignore = self.object })
-    hoverSite = nil
+    hoverSite, hoverWorker = nil, nil
     local dist = res.hit and (res.hitPos - from):length() or 0
     local lines = res.hit and res.hitObject and hoverLines(res.hitObject.id, dist)
     if not lines then return clearHover() end
@@ -758,6 +802,10 @@ return {
                     stopPlacing(true)
                 elseif key.code == input.KEY.Backspace then
                     stopPlacing(false)
+                elseif key.code == input.KEY.RightArrow then
+                    cycleVariant(1)
+                elseif key.code == input.KEY.LeftArrow then
+                    cycleVariant(-1)
                 end
                 return
             end
@@ -770,7 +818,12 @@ return {
                 if ledger then
                     closeLedger()
                 elseif not I.UI.getMode() then
-                    openLedger()
+                    if hoverWorker then
+                        focusWorker = hoverWorker
+                        openLedger('workers')
+                    else
+                        openLedger()
+                    end
                 end
             end
         end,
@@ -793,7 +846,7 @@ return {
         TMW_Message = function(e) ui.showMessage(e.text) end,
         TMW_SetDebug = function(on) debugOn = on end,
         TMW_Ghost = function(e)
-            if placing and placing.kind == e.kind then placing.obj = e.obj end
+            if placing and placing.kind == e.kind then placing.obj = e.obj; placing.checkT = 0 end
         end,
         TMW_OpenWorker = function(e)
             focusWorker = e.wid
@@ -818,6 +871,10 @@ return {
             if e.kind then
                 startPlacing(e.kind)
                 placing.forcedAim = e.at
+                if e.curve then placing.curve = e.curve end
+                if e.raise then placing.raise = e.raise end
+            elseif e.cycle then
+                cycleVariant(e.cycle)
             else
                 stopPlacing(e.confirm)
             end

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Makes the colony tent's two meshes from the game's own Ashlander tent.
+"""Makes the colony tent's meshes from the game's own Ashlander tent.
 
-The outside: vanilla ex_ashl_tent_02.nif has an invisible collision plane
-across its doorway (a loading door normally stands there). Detaching its
+The outside: vanilla ex_ashl_tent_01/02.nif have an invisible collision plane
+across its doorway (a loading door normally stands there). Detaching their
 collision node makes the engine collide with the visible geometry instead,
 which has a real gap at the door: settlers and the player can walk in.
 
 The lining: the outside mesh is one-sided, so from inside you would see
-straight through it. in_ashl_tent_02.nif lines it, but has collision of its
-own that blocks the doorway, so its collision node is emptied: no collision.
+straight through it. in_ashl_tent_01/02.nif line them, but have collision of their
+own that blocks the doorway, so their collision node is emptied: no collision.
 
 Usage: tools/make_tent_meshes.py <Morrowind.bsa> <output-dir>
 """
@@ -95,6 +95,8 @@ if __name__ == '__main__':
     for name, source, patch in (
         ('tent.nif', 'meshes\\x\\ex_ashl_tent_02.nif', detach_collision),
         ('tent_lining.nif', 'meshes\\i\\in_ashl_tent_02.nif', empty_collision),
+        ('tent_large.nif', 'meshes\\x\\ex_ashl_tent_01.nif', detach_collision),
+        ('tent_large_lining.nif', 'meshes\\i\\in_ashl_tent_01.nif', empty_collision),
     ):
         path = os.path.join(out, name)
         with open(path, 'wb') as f:

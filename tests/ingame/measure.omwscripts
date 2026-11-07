@@ -1,0 +1,2 @@
+GLOBAL: scripts/tomorrowind_test/gallery_global.lua
+PLAYER: scripts/tomorrowind_test/measure.lua

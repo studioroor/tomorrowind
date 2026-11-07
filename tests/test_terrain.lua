@@ -53,7 +53,8 @@ test('foundation adds timber and leveling work to a site', function()
         local st = C.currentStep(c, w)
         while st do st = C.completeStep(c, w) end
     end
-    eq(C.siteStatus(c, farm.id), 'Timber 10/10 - leveling the ground 0%')
+    local total = defs.buildings.farm.cost.wood + 4
+    eq(C.siteStatus(c, farm.id), string.format('Timber %d/%d - leveling the ground 0%%', total, total))
     local t = C.nextTask(c, w)
     assert(t.steps[2].label:find('Leveling'), t.steps[2].label)
     -- refund includes the foundation timber
@@ -66,4 +67,20 @@ test('tall buildings may sink deeper into a slope', function()
     local spread = 500 -- burial = 500 * (1 - levelAt) = 300 > 220
     eq(T.analyze({ 100, 100 + spread }).ok, false)
     eq(T.analyze({ 100, 100 + spread }, 1000).ok, true) -- 0.35 * 1000 = 350
+end)
+
+test('raising a building lifts its floor and needs more foundation', function()
+    local T = require('scripts.tomorrowind.core.terrain')
+    local base = T.analyze({ 0, 100 })
+    local up = T.analyze({ 0, 100 }, nil, 100)
+    eq(up.level, base.level + 100)
+    assert(up.wood > base.wood and up.work > base.work)
+end)
+
+test('sinking a building on purpose is allowed however deep', function()
+    local T = require('scripts.tomorrowind.core.terrain')
+    local steep = T.analyze({ 0, 1000 })
+    eq(steep.ok, false)
+    eq(T.analyze({ 0, 1000 }, nil, -100).ok, true)
+    eq(T.analyze({ 0, 1000 }, nil, 100).ok, false, 'raising does not make it less steep')
 end)

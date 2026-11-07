@@ -16,7 +16,7 @@ defs.resources = {
 }
 defs.resourceOrder = { 'food', 'wood', 'ore', 'ingot' }
 
-defs.startingStock = { food = 20, wood = 30, ore = 0, ingot = 0 }
+defs.startingStock = { food = 30, wood = 40, ore = 0, ingot = 0 }
 defs.startingWorkers = 3
 
 defs.carryAmount = 5          -- max units a hauler carries per trip
@@ -27,6 +27,7 @@ defs.hunger = {
     eatBelow = 0.5,           -- go eat when fed drops below this
     hungryBelow = 0.25,       -- below this: works at reduced speed
     hungrySpeed = 0.5,
+    mealFood = 2,             -- Saltrice per meal
     mealBelow = 0.8,          -- in free time, have a meal below this
     asleepFactor = 0.25,      -- hunger grows this much slower while asleep
     mealHours = 0.25,         -- how long a meal by the campfire takes
@@ -123,11 +124,38 @@ defs.voice = {
 -- A building under construction comes up out of the ground, growing from
 -- fromScale to full size. It moves in steps of stepPercent: moving an object
 -- with collision is not free, every step redoes part of the navmesh.
-defs.rise = { fromScale = 0.8, stepPercent = 4 }
+defs.rise = { fromScale = 0.8, stepPercent = 1 }
 
+-- Placement: how far a building can be moved up or down from where it would
+-- go by itself (units), and how fast while holding the key (units/second).
+defs.placeRaise = { limit = 500, speed = 150 }
+
+-- The look of a site: its building, with its chosen variant's fields on top.
+local looks = {}
+function defs.look(kind, variant)
+    local d = defs.buildings[kind]
+    local v = d.variants and d.variants[variant or 1]
+    if not v then return d end
+    looks[kind] = looks[kind] or {}
+    local l = looks[kind][variant or 1]
+    if not l then
+        l = setmetatable({}, { __index = function(_, k)
+            local own = v[k]
+            if own ~= nil then return own end
+            return d[k]
+        end })
+        looks[kind][variant or 1] = l
+    end
+    return l
+end
+
+-- Newcomers arrive more slowly the bigger the colony, and only if there is
+-- food to feed everybody for a while.
 defs.arrival = {
-    everyHours = 1,           -- a newcomer may arrive this often
-    minFood = 4,              -- ...but only if there is food to spare
+    everyHours = 2,           -- hours between newcomers...
+    perSettler = 0.25,        -- ...plus this for every settler already here
+    minFood = 10,             -- food in stock needed...
+    foodPerSettler = 3,       -- ...plus this for every settler already here
 }
 
 defs.buildWorkPerTrip = 10    -- seconds of building per builder visit
@@ -161,32 +189,32 @@ defs.slope = {
 defs.buildings = {
     storehouse = {
         name = 'Storehouse', model = 'meshes/x/ex_de_shack_02.nif', cost = {}, work = 0, beds = 4,
-        founding = true, footprint = 350,
+        founding = true, footprint = 350, storage = 150,
     },
     lumber = {
         -- a chopping stump with a stack of logs beside it
         name = "Woodcutter's Camp", model = 'meshes/f/flora_treestump_wg_02.nif', scale = 0.5,
         cost = {}, work = 10,
-        job = 'Woodcutter', slots = 3, cycle = 10, output = { wood = 2 }, maxBuilders = 3,
+        job = 'Woodcutter', slots = 3, cycle = 20, output = { wood = 2 }, maxBuilders = 3,
         tool = 'axe', footprint = 250, decor = 'lumber',
         sound = { id = 'Light Armor Hit', pitch = { 0.6, 0.75 }, volume = 0.9 },
     },
     farm = {
-        name = 'Saltrice Paddy', model = 'meshes/o/flora_saltrice_02.nif', cost = { wood = 6 }, work = 15,
-        job = 'Farmer', slots = 3, cycle = 16, output = { food = 2 }, maxBuilders = 4,
+        name = 'Saltrice Paddy', model = 'meshes/o/flora_saltrice_02.nif', cost = { wood = 10 }, work = 15,
+        job = 'Farmer', slots = 3, cycle = 30, output = { food = 2 }, maxBuilders = 4,
         tool = 'hoe', footprint = 300,
         decor = 'farm',
         sound = { id = 'Body Fall Small', pitch = { 1.2, 1.5 }, volume = 0.6 },
     },
     mine = {
-        name = 'Ore Vein', model = 'meshes/o/contain_rock_ebony_01.nif', cost = { wood = 10 }, work = 20,
-        job = 'Miner', slots = 3, cycle = 12, output = { ore = 2 }, maxBuilders = 4,
+        name = 'Ore Vein', model = 'meshes/o/contain_rock_ebony_01.nif', cost = { wood = 16 }, work = 20,
+        job = 'Miner', slots = 3, cycle = 24, output = { ore = 2 }, maxBuilders = 4,
         tool = 'pick', footprint = 200,
         sound = { id = 'Heavy Armor Hit', pitch = { 0.75, 0.95 }, volume = 0.8 },
     },
     smelter = {
-        name = 'Smelter', model = 'meshes/f/furn_de_forge_01.nif', cost = { wood = 10, ore = 6 }, work = 30,
-        job = 'Smelter', slots = 2, cycle = 14, input = { ore = 2 }, output = { ingot = 1 }, maxBuilders = 4,
+        name = 'Smelter', model = 'meshes/f/furn_de_forge_01.nif', cost = { wood = 20, ore = 8 }, work = 30,
+        job = 'Smelter', slots = 2, cycle = 40, input = { ore = 2 }, output = { ingot = 1 }, maxBuilders = 4,
         tool = 'hammer', footprint = 200,
         sound = { id = 'Repair', pitch = { 0.95, 1.1 }, volume = 0.9 },
         decor = 'smelter',
@@ -196,20 +224,39 @@ defs.buildings = {
     },
     guardpost = {
         name = 'Guard Post', model = 'meshes/f/furn_banner_hlaalu_01.nif',
-        cost = { wood = 10, ingot = 2 }, work = 20,
+        cost = { wood = 15, ingot = 4 }, work = 20,
         job = 'Guard', slots = 2, guard = true, footprint = 120, maxBuilders = 4,
     },
     stockade = {
         name = 'Stockade', model = 'meshes/x/ex_de_shack_01.nif',
-        cost = { wood = 24, ingot = 2 }, work = 30,
+        cost = { wood = 40, ingot = 6 }, work = 40,
         cells = 4, footprint = 350, decor = 'stockade', maxBuilders = 6,
     },
     house = {
-        name = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_01.nif', cost = { wood = 20, ingot = 4 }, work = 40,
-        beds = 4, footprint = 700,
+        -- Hlaalu models: the door sills sit about 70 below the origin, on a solid
+        -- plinth that goes into the ground (and shows on the downhill side)
+        name = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_01.nif', cost = { wood = 40, ingot = 8 }, work = 60,
+        beds = 4, footprint = 700, lift = 80,
+        variants = {
+            { label = 'Hlaalu House, tall' },
+            { label = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_04.nif' },
+            { label = 'Hlaalu House, with stairs', model = 'meshes/x/ex_hlaalu_b_03.nif' },
+            { label = 'Hlaalu Manor', model = 'meshes/x/ex_hlaalu_b_06.nif' },
+            { label = 'Hlaalu Hall', model = 'meshes/x/ex_hlaalu_b_07.nif' },
+            { label = 'Hlaalu Residence', model = 'meshes/x/ex_hlaalu_b_10.nif' },
+            { label = 'Hlaalu Tower', model = 'meshes/x/ex_hlaalu_b_13.nif', lift = 420 },
+            { label = 'Hlaalu Terrace', model = 'meshes/x/ex_hlaalu_b_17.nif' },
+            { label = 'Timber House', model = 'meshes/x/ex_common_building_01.nif', lift = 400 },
+            { label = 'Dunmer Shack', model = 'meshes/x/ex_de_shack_03.nif', lift = 170 },
+            { label = 'Dunmer Stilt House', model = 'meshes/x/ex_de_shack_05.nif', lift = 370 },
+        },
+    },
+    warehouse = {
+        name = 'Warehouse', model = 'meshes/x/ex_de_shack_04.nif', cost = { wood = 30 }, work = 25,
+        storage = 150, footprint = 350, lift = 320, maxBuilders = 4,
     },
 }
-defs.buildOrder = { 'lumber', 'farm', 'mine', 'smelter', 'house', 'guardpost', 'stockade' }
+defs.buildOrder = { 'lumber', 'farm', 'mine', 'smelter', 'warehouse', 'house', 'guardpost', 'stockade' }
 
 -- Furnishings: smaller things that make the colony a home. They use the same
 -- construction pipeline as buildings, without scaffolds or foundations, and
@@ -228,8 +275,24 @@ defs.buildOrder = { 'lumber', 'farm', 'mine', 'smelter', 'house', 'guardpost', '
 --   objectType: 'container' or 'door' instead of an activator
 --   segment:    walls snap end to end: half its length along the local x
 --               axis, `at` = where its middle is along that axis
+--   variants:   other models to choose from while placing (arrow keys). Each
+--               overrides what it needs of model, lift, scale, props, segment,
+--               sleepZ; the first is the building's own fields.
 --   rises:      comes up out of the ground while built, like a building
 --   opensLedger: activating it opens the ledger, looking at it shows a summary
+-- Books lying on a shelf's boards: three per board, turned to fit its depth.
+local function shelfBooks(boards, spread)
+    local kinds = { 'bookA', 'bookB', 'bookC' }
+    local props = {}
+    for row, z in ipairs(boards) do
+        for i = 1, 3 do
+            local x = ((i + row) % 3 - 1) * spread * 0.8 + (row - 2) * 6
+            props[#props + 1] = { decor = kinds[(i + row) % 3 + 1], offset = { x, -7, z + 2.5 }, turn = 1.57, scale = 0.6 }
+        end
+    end
+    return props
+end
+
 local function furnishing(t)
     t.small = true
     t.footprint = t.footprint or 60
@@ -239,57 +302,118 @@ local function furnishing(t)
 end
 defs.furnishOrder = {
     furnishing({ key = 'campfire', name = 'Campfire', model = 'meshes/f/furn_de_firepit_01.nif',
-        lift = 20, cost = { wood = 3 }, work = 5, desc = 'Settlers eat and rest here',
+        lift = 20, cost = { wood = 4 }, work = 5, desc = 'Settlers eat and rest here',
         props = { { light = 'light_fire_nosmoke_128', offset = { 0, 0, 5 } } },
+        variants = {
+            { label = 'Coal pit' },
+            { label = 'Stone ring', model = 'meshes/f/furn_firepit00.nif', lift = 40,
+              props = { { light = 'light_fire_nosmoke_128', offset = { 0, 0, 25 } } } },
+        },
         interact = { label = 'Resting by the campfire', hours = 1, slots = 6, weight = 4, meal = true } }),
     furnishing({ key = 'lamppost', name = 'Lamp Post', model = 'meshes/f/furn_woodpost_01.nif',
-        lift = 60, cost = { wood = 4, ingot = 1 }, work = 6, desc = 'Lights up the night',
+        lift = 60, cost = { wood = 6, ingot = 2 }, work = 6, desc = 'Lights up the night',
         props = { { decor = 'lampArm', offset = { 22, 0, 195 } },
                   { light = 'light_de_streetlight_01_223_s', offset = { 53, 0, 221 } } } }),
     furnishing({ key = 'lantern', name = 'Paper Lantern', model = 'meshes/f/furn_de_ashl_post.nif',
-        lift = 80, cost = { wood = 2 }, work = 3, desc = 'A small warm light',
-        props = { { light = 'light_de_paper_lantern_01', offset = { 0, 0, 170 } } } }),
+        lift = 80, cost = { wood = 3 }, work = 3, desc = 'A small warm light',
+        props = { { light = 'light_de_paper_lantern_01', offset = { 0, 0, 170 } } },
+        variants = {
+            { label = 'Round' },
+            { label = 'Long', props = { { light = 'light_de_paper_lantern_04', offset = { 0, 0, 170 } } } },
+        } }),
     furnishing({ key = 'chair', name = 'Chair', model = 'meshes/f/furn_com_chair_01.nif',
-        lift = 45, cost = { wood = 2 }, work = 3, desc = 'Somewhere to take a break',
-        interact = { label = 'Taking a break', hours = 0.5, slots = 1, weight = 1 } }),
+        lift = 45, cost = { wood = 3 }, work = 3, desc = 'Somewhere to take a break',
+        interact = { label = 'Taking a break', hours = 0.5, slots = 1, weight = 1 },
+        variants = {
+            { label = 'Armchair' },
+            { label = 'Plain chair', model = 'meshes/f/furn_com_chair_03.nif', lift = 36 },
+            { label = 'Dunmer chair', model = 'meshes/f/furn_de_chair_01.nif', lift = 37 },
+            { label = 'Dunmer high chair', model = 'meshes/f/furn_de_chair_03.nif', lift = 44 },
+            { label = 'Bar stool', model = 'meshes/f/furn_com_stool_01.nif', lift = 19 },
+            { label = 'Dunmer stool', model = 'meshes/f/furn_de_stool_01.nif', lift = 22 },
+            { label = 'Outdoor stool', model = 'meshes/f/furn_de_ex_stool_02.nif', lift = 19 },
+        } }),
     furnishing({ key = 'bench', name = 'Bench', model = 'meshes/f/furn_de_ex_bench_01.nif',
-        lift = 19, cost = { wood = 3 }, work = 4, desc = 'Somewhere to take a break',
-        interact = { label = 'Taking a break', hours = 0.5, slots = 2, weight = 1 } }),
+        lift = 19, cost = { wood = 4 }, work = 4, desc = 'Somewhere to take a break',
+        interact = { label = 'Taking a break', hours = 0.5, slots = 2, weight = 1 },
+        variants = {
+            { label = 'Outdoor bench' },
+            { label = 'Plain bench', model = 'meshes/f/furn_com_bench_01.nif', lift = 22 },
+            { label = 'Short bench', model = 'meshes/f/furn_com_bench_02.nif', lift = 19 },
+            { label = 'Dunmer bench', model = 'meshes/f/furn_de_bench_01.nif', lift = 22 },
+            { label = 'Long Dunmer bench', model = 'meshes/f/furn_de_bench_03.nif', lift = 23 },
+        } }),
     furnishing({ key = 'table', name = 'Table', model = 'meshes/f/furn_de_ex_table_02.nif',
-        lift = 32, cost = { wood = 4 }, work = 5, desc = 'For a drink and a chat',
-        interact = { label = 'Having a drink and a chat', hours = 0.75, slots = 4, weight = 3, prop = 'cup' } }),
+        lift = 32, cost = { wood = 6 }, work = 5, desc = 'For a drink and a chat',
+        interact = { label = 'Having a drink and a chat', hours = 0.75, slots = 4, weight = 3, prop = 'cup' },
+        variants = {
+            { label = 'Outdoor table' },
+            { label = 'Long outdoor table', model = 'meshes/f/furn_de_ex_table_03.nif', lift = 30 },
+            { label = 'Long table', model = 'meshes/f/furn_com_table_01.nif', lift = 35 },
+            { label = 'Round table', model = 'meshes/f/furn_com_table_03.nif', lift = 28 },
+            { label = 'Small table', model = 'meshes/f/furn_com_table_05.nif', lift = 28 },
+            { label = 'Square Dunmer table', model = 'meshes/f/furn_de_table_01.nif', lift = 29 },
+            { label = 'Long Dunmer table', model = 'meshes/f/furn_de_table_03.nif', lift = 35 },
+        } }),
     furnishing({ key = 'bookshelf', name = 'Bookshelf', model = 'meshes/f/furn_com_bookshelf_02.nif',
-        lift = 94, cost = { wood = 6 }, work = 6, desc = 'Settlers read here',
-        -- vanilla shelves come empty: stacks of books on the three shelves
-        props = {
-            { decor = 'bookA', offset = { -45, -7, 137 }, turn = 1.57, scale = 0.6 }, { decor = 'bookB', offset = { -12, -7, 139 }, turn = 1.57, scale = 0.6 },
-            { decor = 'bookC', offset = { 40, -7, 137 }, turn = 1.57, scale = 0.6 }, { decor = 'bookB', offset = { -40, -7, 90 }, turn = 1.57, scale = 0.6 },
-            { decor = 'bookA', offset = { 15, -7, 88 }, turn = 1.57, scale = 0.6 }, { decor = 'bookC', offset = { 50, -7, 90 }, turn = 1.57, scale = 0.6 },
-            { decor = 'bookC', offset = { -50, -7, 47 }, turn = 1.57, scale = 0.6 }, { decor = 'bookA', offset = { -10, -7, 45 }, turn = 1.57, scale = 0.6 },
-            { decor = 'bookB', offset = { 35, -7, 47 }, turn = 1.57, scale = 0.6 },
+        lift = 91, cost = { wood = 10 }, work = 6, desc = 'Settlers read here',
+        -- vanilla shelves come empty, so books lie on the boards (heights above
+        -- the ground, measured in game on bare shelves: tests/ingame photo scene)
+        props = shelfBooks({ 138, 95, 53 }, 55),
+        variants = {
+            { label = 'Tall bookshelf' },
+            { label = 'Wide bookshelf', model = 'meshes/f/furn_com_bookshelf_01.nif', lift = 94, props = shelfBooks({ 136, 95, 51 }, 55) },
+            { label = 'Dunmer bookshelf', model = 'meshes/f/furn_de_bookshelf_01.nif', lift = 76, props = shelfBooks({ 87, 42 }, 65) },
+            { label = 'Long Dunmer bookshelf', model = 'meshes/f/furn_de_bookshelf_02.nif', lift = 80, props = shelfBooks({ 76, 28 }, 70) },
         },
         interact = { label = 'Reading a book', hours = 1, slots = 2, weight = 3, prop = 'book' } }),
     furnishing({ key = 'chest', name = 'Chest', model = 'meshes/o/contain_com_chest_01.nif',
-        lift = 17, cost = { wood = 5 }, work = 4, desc = 'Stores your things', objectType = 'container', capacity = 400,
-        interact = { label = 'Looking through a chest', hours = 0.25, slots = 1, weight = 1 } }),
+        lift = 17, cost = { wood = 8 }, work = 4, desc = 'Stores your things', objectType = 'container', capacity = 400,
+        interact = { label = 'Looking through a chest', hours = 0.25, slots = 1, weight = 1 },
+        variants = {
+            { label = 'Plain chest' },
+            { label = 'Banded chest', model = 'meshes/o/contain_com_chest_02.nif', lift = 22 },
+            { label = 'Dunmer chest', model = 'meshes/o/contain_de_chest_01.nif', lift = 23 },
+            { label = 'Fine Dunmer chest', model = 'meshes/o/contain_de_chest_02.nif', lift = 17 },
+            { label = 'Old chest', model = 'meshes/o/contain_chest10.nif', lift = 18 },
+            { label = 'Small chest', model = 'meshes/o/contain_chest_small_01.nif', lift = 6 },
+        } }),
     furnishing({ key = 'bedroll', name = 'Bedroll', model = 'meshes/f/active_de_bedroll.nif',
-        lift = 13, cost = { wood = 2 }, work = 3, beds = 1, sleepOn = true, sleepZ = 26, desc = '+1 bed' }),
+        lift = 13, cost = { wood = 8 }, work = 3, beds = 1, sleepOn = true, sleepZ = 26, desc = '+1 bed' }),
     furnishing({ key = 'bed', name = 'Bed', model = 'meshes/f/active_de_bed_01.nif',
-        lift = 31, cost = { wood = 6 }, work = 6, beds = 1, sleepOn = true, sleepZ = 60, desc = '+1 bed' }),
+        lift = 31, cost = { wood = 14, ingot = 1 }, work = 6, beds = 1, sleepOn = true, sleepZ = 60, desc = '+1 bed',
+        variants = {
+            { label = 'Dunmer bed' },
+            { label = 'Dark Dunmer bed', model = 'meshes/f/active_de_bed_04.nif', lift = 32 },
+            { label = 'Wide Dunmer bed', model = 'meshes/f/active_de_bed_05.nif', lift = 33 },
+            { label = 'Plain bed', model = 'meshes/f/furn_com_bed_02.nif', lift = 31 },
+            { label = 'Rough bed', model = 'meshes/f/furn_com_bed_03.nif', lift = 29 },
+            { label = 'Canopy bed', model = 'meshes/f/furn_com_bed_01.nif', lift = 86 },
+        } }),
     -- scaled up so its door is wide enough for the navmesh (routes go through
     -- it): meshes come from tools/make_tent_meshes.py
     furnishing({ key = 'tent', name = 'Tent', model = 'meshes/tomorrowind/tent.nif', footprint = 360,
-        scale = 1.3, lift = 221, cost = { wood = 12 }, work = 12, hollow = true, rises = true, maxBuilders = 4,
+        scale = 1.3, lift = 221, cost = { wood = 20 }, work = 12, hollow = true, rises = true, maxBuilders = 4,
         desc = 'Put beds and furniture inside',
         -- the outside mesh is one-sided: this lines it from the inside
         -- (its floor sits 90 above its origin's expected height: measured in game)
-        props = { { decor = 'tentLining', offset = { 0, 0, 131 }, scale = 1.12 } } }),
+        props = { { decor = 'tentLining', offset = { 0, 0, 131 }, scale = 1.12 } },
+        variants = {
+            { label = 'Round tent' },
+            { label = 'Large tent', model = 'meshes/tomorrowind/tent_large.nif', scale = 1.1, lift = 200,
+              props = { { decor = 'tentLargeLining', offset = { 0, 0, 150 }, scale = 1 } } },
+        } }),
     furnishing({ key = 'fence', name = 'Wooden Fence', model = 'meshes/x/furn_com_fence_02.nif',
-        lift = 120, cost = { wood = 2 }, work = 3, segment = { half = 132 }, desc = 'Snaps to other fences' }),
+        lift = 120, cost = { wood = 3 }, work = 3, segment = { half = 132 }, desc = 'Snaps to walls and fences' }),
     furnishing({ key = 'wall', name = 'Stone Wall', model = 'meshes/x/ex_drystonewall_s_01.nif',
-        lift = 90, cost = { ore = 3 }, work = 6, segment = { half = 126 }, desc = 'Snaps to other walls' }),
+        lift = 90, cost = { ore = 4 }, work = 6, segment = { half = 126 }, desc = 'Snaps to walls and fences',
+        variants = {
+            { label = 'Dry stone' },
+            { label = 'Redoran', model = 'meshes/x/ex_redwall_straight_01.nif', lift = 150 },
+            { label = 'Hlaalu, tall', model = 'meshes/x/ex_hlaalu_wall_01.nif', lift = 220 },
+        } }),
     furnishing({ key = 'gate', name = 'Gate', model = 'meshes/x/ex_de_sn_gate.nif', objectType = 'door',
-        template = 'ex_de_sn_gate', lift = 80, cost = { wood = 5, ingot = 1 }, work = 6,
+        template = 'ex_de_sn_gate', lift = 80, cost = { wood = 6, ingot = 2 }, work = 6,
         segment = { half = 64, at = 63 }, desc = 'Opens for you and your settlers' }),
     -- comes with the colony; can be moved by removing it and building another
     furnishing({ key = 'board', name = 'Colony Board', model = 'meshes/f/furn_de_banner_book_01.nif',
@@ -363,6 +487,7 @@ defs.decorModels = {
     coals = 'meshes/f/furn_de_firepit_01.nif',
     lampArm = 'meshes/x/furn_de_lightpost_01.nif',
     tentLining = 'meshes/tomorrowind/tent_lining.nif',
+    tentLargeLining = 'meshes/tomorrowind/tent_large_lining.nif',
     boardPost = 'meshes/x/furn_com_fence_03.nif',
     bookA = 'meshes/m/text_octavo_01.nif',
     bookB = 'meshes/m/text_quarto_01.nif',

@@ -112,7 +112,9 @@ end)
 test('two haulers never over-deliver thanks to reservations', function()
     local c, w = colony(3)
     c.stock.wood = 100
-    local farm = C.addSite(c, 'farm', P(800, 0), 0, false) -- needs 6 wood
+    local need = defs.buildings.farm.cost.wood
+    local farm = C.addSite(c, 'farm', P(800, 0), 0, false)
+    farm.needs.wood = 6
     local t1 = C.nextTask(c, w[1])
     local t2 = C.nextTask(c, w[2])
     local t3 = C.nextTask(c, w[3])
@@ -124,6 +126,7 @@ test('two haulers never over-deliver thanks to reservations', function()
     runTask(c, w[1]); runTask(c, w[2])
     eq(farm.needs.wood, 0)
     eq(c.stock.wood, 94)
+    eq(need > 0, true)
 end)
 
 test('cancelling a haul releases the reservation and returns carried goods', function()
@@ -138,7 +141,7 @@ test('cancelling a haul releases the reservation and returns carried goods', fun
     eq(c.stock.wood, 10)
     eq(c.reserved.wood, 0)
     eq(farm.incoming.wood, 0)
-    eq(C.missing(c, farm.id).wood, 6)
+    eq(C.missing(c, farm.id).wood, defs.buildings.farm.cost.wood)
 end)
 
 test('hungry workers eat first, starving workers stop', function()
@@ -153,7 +156,7 @@ test('hungry workers eat first, starving workers stop', function()
     local food = c.stock.food
     runTask(c, w[1])
     eq(worker.fed, 1)
-    eq(c.stock.food, food - 1)
+    eq(c.stock.food, food - defs.hunger.mealFood)
 
     c.stock.food = 0
     C.tick(c, 0, 5) -- below hungry threshold
@@ -170,20 +173,22 @@ end)
 
 test('houses add beds, newcomers arrive only with space and food', function()
     local c, w = colony(4) -- storehouse beds = 4: full
-    C.tick(c, 0, 3)
+    c.stock.food = 100
+    local wait = defs.arrival.everyHours + defs.arrival.perSettler * 4
+    C.tick(c, 0, wait)
     eq(hasEvent(C.drainEvents(c), 'arrival'), nil, 'no beds free')
     C.addSite(c, 'house', P(2000, 0), 0, true)
     C.drainEvents(c)
-    C.tick(c, 0, 1)
+    C.tick(c, 0, wait)
     assert(hasEvent(C.drainEvents(c), 'arrival'), 'arrival once there is a house')
     eq(c.pendingArrivals, 1)
-    C.tick(c, 0, 1)
+    C.tick(c, 0, wait + 1)
     C.addWorker(c, { name = 'New' })
     eq(c.pendingArrivals, 1) -- second arrival pending after one joined
     c.stock.food = 0
     for _, wid in ipairs(c.workerOrder) do c.workers[wid].fed = 1 end
     C.drainEvents(c)
-    C.tick(c, 0, 1)
+    C.tick(c, 0, wait + 1)
     eq(hasEvent(C.drainEvents(c), 'arrival'), nil, 'no food, no newcomers')
 end)
 
@@ -245,13 +250,13 @@ test('offscreen workers eat automatically during ticks', function()
     local food = c.stock.food
     C.tick(c, 0, 4)
     assert(worker.fed > defs.hunger.eatBelow, "ate on the way")
-    eq(c.stock.food, food - 1)
+    eq(c.stock.food, food - defs.hunger.mealFood)
 end)
 
 test('status strings are readable', function()
     local c, w = colony(1)
     local farm = C.addSite(c, 'farm', P(800, 0), 0, false)
-    eq(C.siteStatus(c, farm.id), 'Timber 0/6 - waiting for materials')
+    eq(C.siteStatus(c, farm.id), string.format('Timber 0/%d - waiting for materials', defs.buildings.farm.cost.wood))
     local mine = C.addSite(c, 'mine', P(1000, 0), 0, true)
     C.assign(c, w[1], mine.id)
     eq(C.siteStatus(c, mine.id), '1/3 Miners')

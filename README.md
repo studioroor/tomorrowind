@@ -22,11 +22,13 @@ name and face.
 | Key | |
 |---|---|
 | **K** | Open / close the Colony Ledger |
-| Activate a settler | Open their row in the ledger (job, status, Talk) |
+| Activate a settler | Talk to them |
 | Activate a building | Open the overview with that building |
-| Look at a settler | See what they're doing |
+| Look at a settler | See what they're doing; **K** opens their row in the ledger |
 | **Delete** | Remove the furnishing you're looking at |
-| **Z / X** | Rotate a building while placing |
+| **Z / X** | Rotate while placing; a wall or fence that has snapped on bends around the joint |
+| **Left / Right** | Next or previous model while placing (houses, tents, chairs, chests...) |
+| **Up / Down** | Raise or lower while placing |
 | **Enter** | Place the building |
 | **Backspace** | Cancel placement |
 
@@ -42,17 +44,23 @@ name and face.
 
 | Building | Cost | Does |
 |---|---|---|
-| Woodcutter's Camp | free | 3 woodcutters → Timber |
-| Saltrice Paddy | 6 Timber | 3 farmers → Saltrice (food) |
-| Ore Vein | 10 Timber | 3 miners → Raw Ore |
-| Smelter | 10 Timber, 6 Ore | 2 smelters turn 2 Ore → 1 Iron Ingot |
-| Hlaalu House | 20 Timber, 4 Ingots | +4 beds |
-| Storehouse | (founding) | stockpile, 4 beds |
+| Woodcutter's Camp | free | 3 woodcutters, each about 75 Timber a day |
+| Saltrice Paddy | 10 Timber | 3 farmers, each about 60 Saltrice a day (feeds about 6) |
+| Ore Vein | 16 Timber | 3 miners, each about 70 Raw Ore a day |
+| Smelter | 20 Timber, 8 Ore | 2 smelters, each about 25 Iron Ingots a day from 50 Ore |
+| Warehouse | 30 Timber | stores 150 more of everything |
+| Hlaalu House | 40 Timber, 8 Ingots | +4 beds |
+| Storehouse | (founding) | stores 150 of everything, 4 beds |
 
-- Settlers eat Saltrice from the storehouse every few game hours. If they get
+These are for a building about 800 units from the storehouse: walking takes up
+part of the day, so layout matters. `tests/test_economy.lua` checks this balance.
+
+- **Storage is limited.** With no room, production stops until the stock is used
+  or there is a warehouse.
+- **Newcomers** arrive every 2 game hours, plus 15 minutes per settler, if there
+  is a free bed and enough food: 10, plus 3 per settler.
+- Settlers eat 2 Saltrice from the storehouse every few game hours. If they get
   hungry they work at half speed, and if they're starving they stop working.
-- When beds are free and there is food to spare, newcomers arrive about once
-  per game hour.
 - **Gathering on demand.** If a construction site needs something the
   storehouse doesn't have, idle laborers and builders go and make it at the
   right building and carry it straight to the site. That works up the chain
@@ -119,7 +127,8 @@ it and press **Delete**) gives its materials back.
 - **Beds and bedrolls** add a bed each, and settlers visibly sleep on them.
 - **Tents** can be walked into, and you can place furniture inside.
 - **Chests** are real containers. Removing one hands you what's in it.
-- **Fences, walls and gates** snap together end to end. Routes go around stone
+- **Fences, walls and gates** snap together end to end, and bend around the
+  joint with Z and X, keeping the bend for the next piece: walls can curve. Routes go around stone
   walls and through gates, but they don't see fences: settlers who walk into
   one climb over after a few seconds.
 
@@ -127,8 +136,8 @@ it and press **Delete**) gives its materials back.
 
 | Building | Cost | Does |
 |---|---|---|
-| Guard Post | 10 Timber, 2 Ingots | 2 guard jobs; guards get a sword, chitin armour and training |
-| Stockade | 24 Timber, 2 Ingots | holds 4 prisoners |
+| Guard Post | 15 Timber, 4 Ingots | 2 guard jobs; guards get a sword, chitin armour and training |
+| Stockade | 40 Timber, 6 Ingots | holds 4 prisoners |
 
 - When a settler (or you, near the colony) is attacked, the alarm goes up:
   settlers run for the storehouse, guards fight the nearest attacker.
@@ -188,6 +197,9 @@ TEST_CONTENT=visuals.omwscripts  tools/playtest.sh .playtest/vis   # views for s
 TEST_CONTENT=saveload.omwscripts tools/playtest.sh .playtest/sl    # save, reload, compare
 TEST_CONTENT=day.omwscripts      tools/playtest.sh .playtest/day   # a day with furnishings (engine screenshots)
 TEST_CONTENT=life.omwscripts     tools/playtest.sh .playtest/life  # board, rising, downtime, leaving, door traffic
+TEST_CONTENT=fit.omwscripts      tools/playtest.sh .playtest/fit   # bending walls, height, models, talking, rising
+TEST_CONTENT=photo.omwscripts    tools/playtest.sh .playtest/photo # bare shelf heights, side-on building photos
+TEST_CONTENT=measure.omwscripts  tools/playtest.sh .playtest/size  # log sizes of vanilla models
 TEST_CONTENT=tent.omwscripts     tools/playtest.sh .playtest/tent  # doorway rays, tent floor height, views
 TEST_CONTENT=gallery.omwscripts  tools/playtest.sh .playtest/gal   # look at vanilla models
 TEST_CONTENT=probe.omwscripts    tools/playtest.sh .playtest/probe # measure model sizes

@@ -157,6 +157,22 @@ function C.available(c, res)
     return (c.stock[res] or 0) - (c.reserved[res] or 0)
 end
 
+-- How much of each resource the colony can store: 0 means no limit yet
+-- (no storehouse). Goods already in stock stay; production just stops.
+function C.capacity(c)
+    local n = 0
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built then n = n + (def(s).storage or 0) end
+    end
+    return n
+end
+
+local function storageFull(c, res)
+    local cap = C.capacity(c)
+    return cap > 0 and (c.stock[res] or 0) >= cap
+end
+
 function C.beds(c)
     local n = 0
     for _, sid in ipairs(c.siteOrder) do
@@ -234,6 +250,7 @@ function C.addSite(c, kind, pos, yaw, built, opts)
     local site = {
         id = newId(c, 's'),
         kind = kind,
+        variant = opts and opts.variant,
         pos = { x = pos.x, y = pos.y, z = pos.z },
         yaw = yaw or 0,
         built = built and true or false,
@@ -478,17 +495,18 @@ local function storeId(c) return c.storehouse end
 
 -- With a campfire, settlers fetch their food and eat it there.
 local function eatTask(c)
-    reserve(c, 'food', 1)
+    local portion = defs.hunger.mealFood
+    reserve(c, 'food', portion)
     local fire
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
         if s.built and def(s).interact and def(s).interact.meal then fire = s break end
     end
-    local task = { kind = 'eat', label = 'Going to eat', holds = { res = 'food', amount = 1 } }
+    local task = { kind = 'eat', label = 'Going to eat', holds = { res = 'food', amount = portion } }
     if fire then
         task.steps = {
             step('goto', { to = storeId(c), label = 'Fetching some food' }),
-            step('take', { res = 'food', amount = 1, label = 'Taking some food' }),
+            step('take', { res = 'food', amount = portion, label = 'Taking some food' }),
             step('goto', { to = fire.id, label = 'Going to eat by the campfire' }),
             step('eat', { at = fire.id, duration = gameHours(c, defs.hunger.mealHours), label = 'Eating by the campfire' }),
         }
@@ -630,6 +648,11 @@ end
 local function gatherTask(c, w, s, speed)
     local d = def(s)
     local res, amount = next(d.output)
+    if storageFull(c, res) then
+        s.stalled = 'no room in the storehouse'
+        return idleTask(c, 'No room for more ' .. resName(res), 15, s.id)
+    end
+    s.stalled = nil
     return {
         kind = 'gather', site = s.id, label = d.job,
         steps = {
@@ -649,6 +672,10 @@ local function processTask(c, w, s, speed)
     local d = def(s)
     local inRes, inAmount = next(d.input)
     local outRes, outAmount = next(d.output)
+    if storageFull(c, outRes) then
+        s.stalled = 'no room in the storehouse'
+        return idleTask(c, 'No room for more ' .. resName(outRes), 15, s.id)
+    end
     if C.available(c, inRes) < inAmount then
         s.stalled = 'needs ' .. resName(inRes)
         return idleTask(c, 'Waiting for ' .. resName(inRes), 10)
@@ -886,7 +913,7 @@ local function helpNeeded(c)
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
         local d = def(s)
-        if s.built and d.job and d.output and not d.input and not d.guard then
+        if s.built and d.job and d.output and not d.input and not d.guard and not storageFull(c, next(d.output)) then
             local n = #C.assignedTo(c, sid)
             for _, wid in ipairs(c.workerOrder) do
                 local t = c.workers[wid].task
@@ -1024,7 +1051,7 @@ function C.nextTask(c, wid)
     elseif period == 'sleep' and offDuty then
         task = sleepTask(c, w)
     elseif (w.fed < schedOf(w).eatBelow or (period == 'free' and offDuty and w.fed < defs.hunger.mealBelow))
-        and C.available(c, 'food') >= 1 then
+        and C.available(c, 'food') >= defs.hunger.mealFood then
         task = eatTask(c)
     elseif w.prisoner and (period ~= 'work' or not (w.assignment and c.sites[w.assignment])) then
         local _, stockade = C.cells(c)
@@ -1098,8 +1125,8 @@ local function applyStep(c, w, st)
         if w.carry and w.carry.res == 'food' then
             w.carry = nil -- brought along to the campfire
         else
-            unreserve(c, 'food', 1)
-            c.stock.food = c.stock.food - 1
+            unreserve(c, 'food', defs.hunger.mealFood)
+            c.stock.food = c.stock.food - defs.hunger.mealFood
         end
         w.fed = 1
         task.holds = nil
@@ -1168,8 +1195,8 @@ function C.tick(c, dt, hours, skipping)
             local rate = defs.hunger.decayPerHour
             if sleeper and periodFor(w, at) == 'sleep' then rate = rate * defs.hunger.asleepFactor end
             w.fed = math.max(0, w.fed - chunk * rate)
-            if (w.offscreen or skipping) and w.fed < defs.hunger.eatBelow and C.available(c, 'food') >= 1 then
-                c.stock.food = c.stock.food - 1
+            if (w.offscreen or skipping) and w.fed < defs.hunger.eatBelow and C.available(c, 'food') >= defs.hunger.mealFood then
+                c.stock.food = c.stock.food - defs.hunger.mealFood
                 w.fed = 1
             end
             left, at = left - chunk, (at + chunk) % 24
@@ -1181,10 +1208,12 @@ function C.tick(c, dt, hours, skipping)
 
     if c.storehouse then
         c.arrivalTimer = c.arrivalTimer + hours
-        while c.arrivalTimer >= defs.arrival.everyHours do
-            c.arrivalTimer = c.arrivalTimer - defs.arrival.everyHours
-            if C.population(c) + c.pendingArrivals < C.beds(c)
-                and C.available(c, 'food') >= defs.arrival.minFood then
+        local pop = C.population(c) + c.pendingArrivals
+        local wait = defs.arrival.everyHours + defs.arrival.perSettler * pop
+        while c.arrivalTimer >= wait do
+            c.arrivalTimer = c.arrivalTimer - wait
+            if pop < C.beds(c)
+                and C.available(c, 'food') >= defs.arrival.minFood + defs.arrival.foodPerSettler * pop then
                 c.pendingArrivals = c.pendingArrivals + 1
                 emit(c, { kind = 'arrival' })
             end
@@ -1212,6 +1241,11 @@ function C.simulateWorker(c, wid, dt, anyTime)
         w.abstractProgress = w.abstractProgress + dt * speed / cycle
         while w.abstractProgress >= 1 do
             w.abstractProgress = w.abstractProgress - 1
+            if storageFull(c, next(d.output)) then
+                s.stalled = 'no room in the storehouse'
+                w.abstractProgress = 0
+                break
+            end
             if d.input then
                 local inRes, inAmount = next(d.input)
                 if C.available(c, inRes) < inAmount then
@@ -1345,6 +1379,7 @@ function C.siteStatus(c, sid)
         return txt
     end
     if d.beds then return d.beds == 1 and '1 bed' or (d.beds .. ' beds') end
+    if d.storage then return 'Holds ' .. d.storage .. ' of everything' end
     if d.cells then
         return string.format('%d/%d prisoners (all cells)', C.prisonerCount(c), (C.cells(c)))
     end
@@ -1363,21 +1398,24 @@ end
 -- progresses), how far the foundation pilings have gone in (0..1, they go in
 -- while the ground is leveled) and how far the building itself has risen
 -- (0..1, nil before it starts). nil for finished buildings.
-function C.siteVisuals(c, sid)
+--   busy: building work in progress on top of what's been completed: settlers
+--   only book their work when they finish it, but it should show as they go
+function C.siteVisuals(c, sid, busy)
     local s = c.sites[sid]
     if not s or s.built then return nil end
     local work = siteWork(s)
-    local used = work > 0 and math.min(1, s.progress / work) or 0
+    local progress = math.min(work, s.progress + (busy or 0))
+    local used = work > 0 and progress / work or 0
     local v = { piles = {}, pilings = 1 }
     for res, total in pairs(s.cost or def(s).cost) do
         local have = total - (s.needs[res] or 0)
         v.piles[res] = math.max(0, have * (1 - used))
     end
     local level = s.levelWork or 0
-    if level > 0 then v.pilings = math.min(1, s.progress / level) end
+    if level > 0 then v.pilings = math.min(1, progress / level) end
     -- the building comes up once the materials are in and the ground is ready
-    if materialsComplete(s) and s.progress >= level then
-        v.rise = math.min(1, (s.progress - level) / math.max(1, work - level))
+    if materialsComplete(s) and progress >= level then
+        v.rise = math.min(1, (progress - level) / math.max(1, work - level))
     end
     return v
 end
