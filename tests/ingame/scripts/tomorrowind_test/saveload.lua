@@ -38,6 +38,9 @@ return {
                     done.d1 = true
                     dbg({ cmd = 'fxdump' })
                     for _, w in ipairs(snap.workers) do log('after load', w.name, w.status, 'enabled', w.obj.enabled) end
+                    log('inside after load', tostring(snap.insideHost), self.cell.name, 'gold', snap.gold)
+                    for _, s in ipairs(snap.sites) do if s.host then log('hosted', s.kind, s.built, s.obj and s.obj:isValid(), s.obj and s.obj.cell and s.obj.cell.name) end end
+                    dbg({ cmd = 'leave' })
                     dbg({ cmd = 'hour', hour = 8 })
                 end
                 if afterLoad > 14 and not done.d2 then
@@ -45,6 +48,10 @@ return {
                     dbg({ cmd = 'fxdump' })
                     log('workers after load:', snap and #snap.workers or -1)
                     for _, w in ipairs(snap and snap.workers or {}) do log('  ', w.name, w.job, w.status, 'enabled', w.obj.enabled) end
+                end
+                if afterLoad > 6 and not done.d3 then
+                    done.d3 = true
+                    log('after leaving', self.cell.name, 'isExterior', self.cell.isExterior, tostring(snap.insideHost))
                 end
                 if afterLoad > 16 then log('done'); core.quit() end
                 return
@@ -65,6 +72,21 @@ return {
             once('rising', 30, function() dbg({ cmd = 'build', kind = 'lumber', pos = offset(-900, -800), built = false }) end)
             once('stage', 31, function() dbg({ cmd = 'sitestate', kind = 'lumber', delivered = 1, progress = 0.5 }) end)
             once('night', 22, function() dbg({ cmd = 'hour', hour = 23 }) end)
+            -- saved while inside a house, with furniture in it and gold in the treasury
+            once('market', 28, function()
+                dbg({ cmd = 'give', gold = 123 })
+                dbg({ cmd = 'build', kind = 'house', variant = 2, pos = offset(1000, 1300), built = true })
+            end)
+            once('enter', 30, function() dbg({ cmd = 'enter' }) end)
+            once('chair', 32, function()
+                local p = self.position
+                self:sendEvent('TMW_DebugPlace', { kind = 'chair', at = util.vector3(p.x + 40, p.y + 150, p.z) })
+            end)
+            once('chair2', 33, function() self:sendEvent('TMW_DebugPlace', { confirm = true }) end)
+            once('inside', 35, function()
+                log('inside before save', tostring(snap.insideHost), self.cell.name, 'gold', snap.gold)
+                dbg({ cmd = 'finish' })
+            end)
             once('before', 36, function()
                 dbg({ cmd = 'fxdump' })
                 for _, w in ipairs(snap.workers) do log('before save', w.name, w.status, 'enabled', w.obj.enabled) end

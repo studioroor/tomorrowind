@@ -102,6 +102,7 @@ local function overviewTab()
         stockRow[#stockRow + 1] = text(label, 170)
     end
     items[#items + 1] = row(stockRow)
+    items[#items + 1] = text(string.format('Treasury: %d gold', math.floor(snap.gold or 0)))
     local pop = string.format('Settlers: %d / %d beds', snap.pop, snap.beds)
     if snap.pending > 0 then pop = pop .. string.format(' (%d on the way)', snap.pending) end
     if (snap.cells or 0) > 0 or (snap.prisoners or 0) > 0 then
@@ -186,11 +187,16 @@ local function canAfford(cost)
 end
 
 local startPlacing -- forward
+local outdoorsOnly
 
 local function buildTab()
     local items = {
         row({ text('Building', 190, true), text('Materials', 230, true), text('Provides', 240, true) }),
     }
+    if snap.insideHost then
+        items[#items + 1] = text('Step outside to place buildings.')
+        return items
+    end
     for _, kind in ipairs(defs.buildOrder) do
         local d = defs.buildings[kind]
         local provides = d.job and string.format('%d %s jobs', d.slots, d.job)
@@ -215,21 +221,69 @@ local function buildTab()
     return items
 end
 
+outdoorsOnly = function(d)
+    return d.hollow or d.segment or d.rises or d.opensLedger
+end
+
 local function furnishTab()
     local items = {
         row({ text('Furnishing', 190, true), text('Materials', 230, true), text('', 240, true) }),
     }
+    if snap.insideHost then items[#items + 1] = text('Placing inside this house.', nil, true) end
     for _, kind in ipairs(defs.furnishOrder) do
         local d = defs.buildings[kind]
-        local cost = costText(d.cost)
-        if not canAfford(d.cost) then cost = cost .. ' (short)' end
-        items[#items + 1] = row({
-            text(d.name, 190), text(cost, 230), text(d.desc or '', 240),
-            button('Place', function() startPlacing(kind) end),
-        })
+        if not (snap.insideHost and outdoorsOnly(d)) then
+            local cost = costText(d.cost)
+            if not canAfford(d.cost) then cost = cost .. ' (short)' end
+            items[#items + 1] = row({
+                text(d.name, 190), text(cost, 230), text(d.desc or '', 240),
+                button('Place', function() startPlacing(kind) end),
+            })
+        end
     end
     items[#items + 1] = gap(1, 8)
     items[#items + 1] = text('Settlers use these in their free time. Removing one gives its materials back.')
+    return items
+end
+
+-- One row of the trade page: price, and the levels to keep and to buy up to.
+local function tradeRow(r)
+    local t = snap.trade[r]
+    local step = defs.trade.step
+    local function level(field, value)
+        return {
+            button('<', function() send('TMW_TradeSet', { res = r, [field] = math.max(0, value - step) }) end),
+            text(value, 44),
+            button('>', function() send('TMW_TradeSet', { res = r, [field] = value + step }) end),
+        }
+    end
+    local cells = { text(resLabel(r), 110), text(math.floor(snap.stock[r] or 0), 56), text(string.format('%.1f', t.sell), 56) }
+    for _, x in ipairs(level('keep', t.keep)) do cells[#cells + 1] = x end
+    cells[#cells + 1] = gap(24, 1)
+    cells[#cells + 1] = text(string.format('%.1f', t.buy), 56)
+    for _, x in ipairs(level('want', t.want)) do cells[#cells + 1] = x end
+    return row(cells)
+end
+
+local function tradeTab()
+    local items = {
+        row({
+            text(string.format('Treasury: %d gold', math.floor(snap.gold or 0)), 220, true),
+            button('Take 100', function() send('TMW_Treasury', { amount = 100 }) end), gap(),
+            button('Give 100', function() send('TMW_Treasury', { amount = -100 }) end),
+        }),
+        gap(1, 8),
+        row({ text('', 110), text('Stock', 56, true), text('Sells', 56, true), text('Keep', 110, true), gap(24, 1), text('Costs', 56, true), text('Buy up to', 110, true) }),
+    }
+    for _, r in ipairs(defs.resourceOrder) do items[#items + 1] = tradeRow(r) end
+    items[#items + 1] = gap(1, 8)
+    if not snap.market then
+        items[#items + 1] = text('Build a Market Stall and give it a Trader to start selling.')
+    else
+        items[#items + 1] = text('Traders sell what is above Keep. Prices drop as you sell, then recover.')
+        items[#items + 1] = text(snap.caravan and 'A caravan is here: better prices, and it sells your buy list.'
+            or 'Caravans come every couple of days: better prices, and they sell your buy list.')
+    end
     return items
 end
 
@@ -253,9 +307,11 @@ local function ledgerLayout()
             button('Build', function() tab = 'build'; ledger.layout = ledgerLayout(); ledger:update() end, tab == 'build'),
             gap(),
             button('Furnish', function() tab = 'furnish'; ledger.layout = ledgerLayout(); ledger:update() end, tab == 'furnish'),
+            gap(),
+            button('Trade', function() tab = 'trade'; ledger.layout = ledgerLayout(); ledger:update() end, tab == 'trade'),
         })
         local content = (tab == 'workers' and workersTab()) or (tab == 'build' and buildTab())
-            or (tab == 'furnish' and furnishTab()) or overviewTab()
+            or (tab == 'furnish' and furnishTab()) or (tab == 'trade' and tradeTab()) or overviewTab()
         body = { tabs, gap(1, 10), col(content) }
     end
     local all = { row({ text('Colony Ledger', 400, true), button('Close', function() closeLedger() end) }), gap(1, 8) }
@@ -325,6 +381,9 @@ end
 local lastCurve = {}
 
 startPlacing = function(kind)
+    if snap.insideHost and (not defs.buildings[kind].small or outdoorsOnly(defs.buildings[kind])) then
+        return ui.showMessage('That has to be placed outdoors.')
+    end
     closeLedger()
     placing = { kind = kind, yaw = camera.getYaw() + math.pi, valid = false, reason = 'Look at open ground', pathT = 0,
         variant = 1, raise = 0, curve = lastCurve[kind] or 0 }
@@ -401,6 +460,15 @@ local function aimAtGround()
     end
 end
 
+-- Indoors there's no land: the view ray has to hit a floor.
+local function aimAtFloor()
+    if placing.forcedAim then return placing.forcedAim end
+    local from = camera.getPosition()
+    local dir = camera.viewportToWorldVector(v2(0.5, 0.5))
+    local res = nearby.castRay(from, from + dir * 1500, { collisionType = nearby.COLLISION_TYPE.World, ignore = placing.obj })
+    if res.hit and res.hitNormal and res.hitNormal.z > 0.7 then return res.hitPos end
+end
+
 -- Physics check for real obstructions (trees, rocks, houses) under the
 -- footprint: rays straight down, ignoring the preview building and actors.
 local function obstruction(pos, r, top, bottom)
@@ -433,6 +501,8 @@ end
 -- the obstruction rays, so a lantern can stand right next to a wall.
 local function tooClose(d, pos, r, s)
     local other = defs.buildings[s.kind]
+    if s.host ~= snap.insideHost then return false end -- another place entirely
+    if snap.insideHost then return dist2d(pos, s.pos) < (s.radius + r) * 0.6 end
     if d.small then
         if other.hollow or d.hollow then return false end
         if placing.snapped and defs.look(s.kind, s.variant).segment then return false end
@@ -447,6 +517,13 @@ local function validate(pos, dt)
     local r, height = ghostSize()
     placing.radius = r
     local a
+    if snap.insideHost then
+        placing.analysis = { ok = true, level = pos.z + placing.raise, low = pos.z, high = pos.z, depth = 0, wood = 0, work = 0 }
+        for _, s in ipairs(snap.sites or {}) do
+            if tooClose(d, pos, r, s) then return false, 'too close to the ' .. s.name end
+        end
+        return true
+    end
     if d.small then
         -- furnishings follow the ground under their middle: no foundations
         local level = pos.z + placing.raise
@@ -525,7 +602,7 @@ local function updatePlacing(dt)
     if input.isKeyPressed(input.KEY.DownArrow) then placing.raise = math.max(-cfg.limit, placing.raise - cfg.speed * dt) end
 
     local d = defs.look(placing.kind, placing.variant)
-    local hit = aimAtGround()
+    local hit = snap.insideHost and aimAtFloor() or (not snap.insideHost and aimAtGround()) or nil
     local extra
     placing.snapped = false
     if hit and d.segment then hit = snapSegment(d, hit) end
@@ -539,7 +616,7 @@ local function updatePlacing(dt)
             extra = string.format('Sloped ground: foundation +%d Timber, +%ds leveling work', a.wood, a.work)
         end
     else
-        placing.valid, placing.reason = false, 'look at open ground'
+        placing.valid, placing.reason = false, snap.insideHost and 'look at the floor' or 'look at open ground'
     end
     if defs.debug then
         placing.logT = (placing.logT or 0) - dt
@@ -698,6 +775,7 @@ local function boardContent()
     for _, r in ipairs(defs.resourceOrder) do
         stock[#stock + 1] = resLabel(r) .. ': ' .. math.floor(snap.stock[r] or 0)
     end
+    stock[#stock + 1] = math.floor(snap.gold or 0) .. ' gold'
     rows[#rows + 1] = text(table.concat(stock, '    '))
     if snap.underAttack then rows[#rows + 1] = text('THE COLONY IS UNDER ATTACK', nil, true) end
     -- what's being built: buildings each, furnishings counted per kind
@@ -857,7 +935,8 @@ return {
             focusSite = e.sid
             openLedger('overview')
         end,
-        TMW_OpenLedger = function() openLedger('overview') end,
+        TMW_OpenLedger = function(e) openLedger(e and e.tab or 'overview') end,
+        TMW_Face = function(e) camera.setYaw(e.yaw) end,
         TMW_Bubble = function(e)
             for i = #bubbles, 1, -1 do
                 if bubbles[i].obj.id == e.obj.id then table.remove(bubbles, i) end

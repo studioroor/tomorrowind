@@ -364,6 +364,7 @@ handlers['eat'] = {
 -- Free time with a furnishing: stand by it, facing it, with whatever goes
 -- with it in hand (shown like carried goods).
 handlers['interact'] = handlers['eat']
+handlers['sell'] = handlers['eat']
 
 -- Two settlers talking: they face each other and exchange vanilla greetings.
 handlers['chat'] = {

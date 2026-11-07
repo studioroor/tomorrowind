@@ -11,11 +11,11 @@ You found the colony wherever you're standing.
 
 1. In the OpenMW launcher, open **Data Files → Directories** and add this
    folder (`tomorrowind/`).
-2. Enable `Tomorrowind.omwscripts` in the content list.
+2. Enable `Tomorrowind.omwaddon` and `Tomorrowind.omwscripts` in the content list.
 
-There is no `.esp`: tools, buildings and settlers are created as records at
-runtime (OpenMW 0.52 Lua). Every settler is a unique Dunmer with their own
-name and face.
+Tools, buildings and settlers are created as records at runtime (OpenMW 0.52
+Lua), and every settler is a unique Dunmer with their own name and face. The
+`.omwaddon` holds a single empty interior cell, because Lua can't create cells.
 
 ## Playing
 
@@ -132,6 +132,36 @@ it and press **Delete**) gives its materials back.
   walls and through gates, but they don't see fences: settlers who walk into
   one climb over after a few seconds.
 
+### Trade
+
+| Building | Cost | Does |
+|---|---|---|
+| Market Stall | 25 Timber, 2 Ingots | 2 traders carry surplus here and sell it |
+
+- The ledger's **Trade** tab sets how much of each resource to **keep**:
+  traders only sell what's above that, most valuable first.
+- **Prices drop** with every unit sold and recover over time, so flooding the
+  market doesn't pay. Ingots sink fastest.
+- **Caravans** visit a market every two days or so, walking in with a pack guar
+  and staying about 10 hours. They pay 25% more and sell whatever is on your
+  **buy up to** list, up to 30 of each, at a markup. Talk to their trader for the
+  Trade tab.
+- Gold goes to the colony's **treasury**: take it as real septims, or put money in
+  to pay for what you buy.
+
+### Houses
+
+Hlaalu houses, the Timber House and the Dunmer Shack have a working door. Their
+rooms copy the architecture of real Morrowind houses, and start empty. Identical
+houses share a floor plan but each keeps its own furniture.
+
+- Open the **Furnish** tab while inside and place furniture on the floor. Settlers
+  bring the materials to the door and make it inside, unseen.
+- Beds and bedrolls indoors count as beds, and settlers go in to sleep and use
+  furniture there, but you won't see them inside yet.
+- Demolishing a house removes its room. Furniture materials come back, and what
+  was in its chests goes to you.
+
 ### Defense
 
 | Building | Cost | Does |
@@ -166,6 +196,7 @@ scripts/tomorrowind/
                     hauling, construction, hunger, arrivals, off-screen sim
   core/terrain.lua  slope analysis: floor level, foundation cost
   records.lua       runtime records: tools, buildings, unique settlers
+  interiors.lua     generated: the architecture of the houses' rooms
   captive.lua       on attackers: turns lethal blows into a knockout
   global.lua        connects the core to the world: spawns settlers and
                     buildings, sends each settler its next step, save/load
@@ -210,6 +241,8 @@ tools/playtest.sh .playtest/run   # scripted in-game run (sandboxed config)
 TEST_CONTENT=visuals.omwscripts  tools/playtest.sh .playtest/vis   # views for screenshots
 TEST_CONTENT=saveload.omwscripts tools/playtest.sh .playtest/sl    # save, reload, compare
 TEST_CONTENT=day.omwscripts      tools/playtest.sh .playtest/day   # a day with furnishings (engine screenshots)
+TEST_CONTENT=home.omwscripts     tools/playtest.sh .playtest/home  # rooms, furniture per house, trade, caravans
+TEST_CONTENT=doors.omwscripts    tools/playtest.sh .playtest/doors # each house's door against open sky
 TEST_CONTENT=life.omwscripts     tools/playtest.sh .playtest/life  # board, rising, downtime, leaving, door traffic
 TEST_CONTENT=fit.omwscripts      tools/playtest.sh .playtest/fit   # bending walls, height, models, talking, rising
 TEST_CONTENT=photo.omwscripts    tools/playtest.sh .playtest/photo # bare shelf heights, side-on building photos
@@ -224,6 +257,9 @@ with scripted cameras (the engine saves every frame, no screen recording), and
 `tools/make_trailer.py .playtest/take trailer/` cuts it, adding captions in
 MysticCards (OpenMW's Morrowind-style font) and sound (needs ffmpeg, Pillow and
 numpy; `--music file` replaces the generated music).
+
+`tools/make_interiors.py` generates `Tomorrowind.omwaddon` and `interiors.lua` from
+your `Morrowind.esm` (ids and positions only, no game assets).
 
 `meshes/tomorrowind/` holds the tent, made from the game's own Ashlander tent
 by `tools/make_tent_meshes.py` (see the script for what it changes and why).

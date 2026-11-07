@@ -21,9 +21,11 @@ ${EXTRA_SETTINGS:-}
 CFG
 OPENMW="${OPENMW:-/Applications/OpenMW 0.52 RC1/OpenMW.app/Contents/MacOS/openmw}"
 # load the mod unless the user's own config already does
-MOD_ARGS=(--data "$ROOT" --content Tomorrowind.omwscripts)
+MOD_ARGS=(--data "$ROOT" --content Tomorrowind.omwaddon --content Tomorrowind.omwscripts)
 if grep -q "^content=Tomorrowind.omwscripts" "$HOME/Library/Preferences/openmw/openmw.cfg" 2>/dev/null; then
   MOD_ARGS=()
+  grep -q "^content=Tomorrowind.omwaddon" "$HOME/Library/Preferences/openmw/openmw.cfg" 2>/dev/null \
+    || MOD_ARGS=(--content Tomorrowind.omwaddon)
 fi
 "$OPENMW" --config "$OUT/cfg" --user-data "$OUT/userdata" \
   ${MOD_ARGS[@]+"${MOD_ARGS[@]}"} \

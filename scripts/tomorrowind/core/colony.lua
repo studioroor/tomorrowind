@@ -231,6 +231,7 @@ end
 function C.tripSeconds(c, sid)
     local store = c.sites[c.storehouse]
     local s = c.sites[sid]
+    if s and s.host then s = c.sites[s.host] end
     if not store or not s then return 0 end
     return dist(s.pos, store.pos) / defs.walkSpeed
 end
@@ -251,6 +252,7 @@ function C.addSite(c, kind, pos, yaw, built, opts)
         id = newId(c, 's'),
         kind = kind,
         variant = opts and opts.variant,
+        host = opts and opts.host,     -- the house it stands in, for furniture indoors
         pos = { x = pos.x, y = pos.y, z = pos.z },
         yaw = yaw or 0,
         built = built and true or false,
@@ -335,6 +337,11 @@ end
 function C.removeSite(c, sid)
     local s = c.sites[sid]
     if not s or sid == c.storehouse then return false end
+    -- what stands inside goes with the house
+    for i = #c.siteOrder, 1, -1 do
+        local other = c.sites[c.siteOrder[i]]
+        if other and other.host == sid then C.removeSite(c, other.id) end
+    end
     for _, wid in ipairs(c.workerOrder) do
         local w = c.workers[wid]
         if w.task and w.task.site == sid then C.cancelTask(c, wid) end
@@ -472,6 +479,128 @@ end
 C.isGuard = function(c, wid) return isGuard(c, c.workers[wid]) end
 
 ---------------------------------------------------------------------------
+-- trade
+
+local function tradeOf(c)
+    if not c.trade then
+        c.trade = { keep = copy(defs.trade.keep), want = {}, factor = {}, caravanTimer = 0 }
+        for res in pairs(defs.trade.prices) do c.trade.factor[res] = 1 end
+    end
+    return c.trade
+end
+C.tradeOf = tradeOf
+
+function C.gold(c) return c.gold or 0 end
+
+function C.caravanHere(c) return tradeOf(c).caravan ~= nil end
+
+-- What a unit fetches right now.
+function C.sellPrice(c, res)
+    local t = tradeOf(c)
+    local price = defs.trade.prices[res] * t.factor[res]
+    if t.caravan then price = price * defs.trade.caravan.sellBonus end
+    return price
+end
+
+function C.buyPrice(res)
+    return defs.trade.prices[res] * defs.trade.buyMarkup
+end
+
+-- Sell goods: each unit fetches a little less than the one before.
+local function sellGoods(c, res, amount)
+    local t = tradeOf(c)
+    local earned = 0
+    for _ = 1, amount do
+        earned = earned + C.sellPrice(c, res)
+        t.factor[res] = math.max(defs.trade.minFactor, t.factor[res] * (1 - defs.trade.pressure[res]))
+    end
+    c.gold = C.gold(c) + earned
+    return earned
+end
+
+-- The resource worth selling now, and how much of it can go in one load.
+local function pickToSell(c)
+    local t = tradeOf(c)
+    local best, bestPrice
+    for _, res in ipairs(defs.resourceOrder) do
+        local surplus = C.available(c, res) - (t.keep[res] or 0)
+        if surplus >= 1 then
+            local price = C.sellPrice(c, res)
+            if not bestPrice or price > bestPrice then best, bestPrice = res, price end
+        end
+    end
+    if not best then return nil end
+    return best, math.floor(math.min(defs.carryAmount, C.available(c, best) - (t.keep[best] or 0)))
+end
+
+-- Clamp and store the player's trade levels.
+function C.setKeep(c, res, value) tradeOf(c).keep[res] = math.max(0, value) end
+function C.setWant(c, res, value) tradeOf(c).want[res] = math.max(0, value) end
+
+-- Move gold between the treasury and the player. Returns what actually moved.
+function C.withdraw(c, amount)
+    local n = math.min(math.floor(C.gold(c)), amount)
+    c.gold = C.gold(c) - n
+    return n
+end
+
+function C.deposit(c, amount)
+    c.gold = C.gold(c) + amount
+end
+
+local function marketSite(c)
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built and def(s).trade then return s end
+    end
+end
+C.marketSite = marketSite
+
+-- The caravan buys and sells during its visit: fills the buy list.
+local function caravanTrade(c)
+    local t = tradeOf(c)
+    if not t.caravan then return end
+    for _, res in ipairs(defs.resourceOrder) do
+        local short = (t.want[res] or 0) - (c.stock[res] or 0)
+        local cap = C.capacity(c)
+        if cap > 0 then short = math.min(short, cap - (c.stock[res] or 0)) end
+        local price = C.buyPrice(res)
+        local n = math.floor(math.min(short, t.caravan.supply[res] or 0, C.gold(c) / price))
+        if n >= 1 then
+            c.gold = C.gold(c) - n * price
+            c.stock[res] = (c.stock[res] or 0) + n
+            t.caravan.supply[res] = t.caravan.supply[res] - n
+            t.caravan.bought = (t.caravan.bought or 0) + n
+        end
+    end
+end
+
+local function tickTrade(c, hours)
+    local t = tradeOf(c)
+    for res, f in pairs(t.factor) do
+        t.factor[res] = math.min(1, f + (1 - f) * math.min(1, defs.trade.recover * hours))
+    end
+    local market = marketSite(c)
+    if t.caravan and (not market or c.hours >= t.caravan.leavesAt) then
+        t.caravan = nil
+        emit(c, { kind = 'caravan_left' })
+        if market then emit(c, { kind = 'msg', text = 'The caravan has moved on.' }) end
+    end
+    if market and not t.caravan then
+        t.caravanTimer = t.caravanTimer + hours
+        if t.caravanTimer >= defs.trade.caravan.everyHours then
+            t.caravanTimer = 0
+            local supply = {}
+            for res in pairs(defs.trade.prices) do supply[res] = defs.trade.caravan.supply end
+            t.caravan = { leavesAt = c.hours + defs.trade.caravan.stayHours, supply = supply }
+            emit(c, { kind = 'caravan_arrived', site = market.id })
+            emit(c, { kind = 'msg', text = 'A Hlaalu caravan has reached the market.' })
+        end
+    end
+    caravanTrade(c)
+end
+
+---------------------------------------------------------------------------
 -- reservations
 
 local function reserve(c, res, amount)
@@ -552,7 +681,7 @@ local function sleepTask(c, w)
     return {
         kind = 'sleep', site = bed.id, label = 'Sleeping',
         steps = {
-            step('goto', { to = bed.id, label = 'Going to bed' }),
+            step('goto', { to = bed.id, door = true, label = 'Going to bed' }),
             step('sleep', {
                 at = bed.id, duration = seconds, onBed = d.sleepOn or nil, inside = not d.sleepOn or nil,
                 label = d.sleepOn and 'Sleeping' or ('Sleeping in the ' .. d.name),
@@ -641,6 +770,29 @@ local function patrolTask(c, w, post)
             step('idle', { at = target, duration = idle, label = 'Keeping watch', stay = true }),
             step('goto', { to = post.id, label = 'Returning to the Guard Post' }),
             step('idle', { at = post.id, duration = idle, label = 'On watch', stay = true }),
+        },
+    }
+end
+
+-- A trader takes a load of surplus to the market stall and sells it.
+local function tradeTask(c, w, s, speed)
+    local d = def(s)
+    local res, amount = pickToSell(c)
+    if not res or amount < 1 then
+        s.stalled = 'nothing above the keep levels to sell'
+        return idleTask(c, 'Minding the stall', 15, s.id)
+    end
+    s.stalled = nil
+    reserve(c, res, amount)
+    local name = resName(res)
+    return {
+        kind = 'trade', site = s.id, label = 'Trading',
+        holds = { res = res, amount = amount },
+        steps = {
+            step('goto', { to = storeId(c), label = 'Fetching ' .. name .. ' to sell' }),
+            step('take', { res = res, amount = amount, label = 'Taking ' .. name }),
+            step('goto', { to = s.id, label = 'Carrying ' .. name .. ' to the ' .. d.name }),
+            step('sell', { at = s.id, duration = d.cycle / speed, label = 'Selling ' .. name }),
         },
     }
 end
@@ -957,7 +1109,7 @@ local function indoorsTask(c)
     return {
         kind = 'indoors', label = 'Relaxing indoors', site = s.id,
         steps = {
-            step('goto', { to = s.id, label = 'Going into the ' .. name }),
+            step('goto', { to = s.id, door = true, label = 'Going into the ' .. name }),
             step('rest', { at = s.id, inside = true, duration = gameHours(c, between(defs.downtime.indoorsHours)),
                 label = 'Relaxing in the ' .. name }),
         },
@@ -1066,6 +1218,8 @@ function C.nextTask(c, wid)
             local s = w.assignment and w.assignment ~= 'builder' and c.sites[w.assignment]
             if s and def(s).guard then
                 task = patrolTask(c, w, s)
+            elseif s and def(s).trade then
+                task = tradeTask(c, w, s, speed)
             elseif s then
                 if def(s).input then
                     task = processTask(c, w, s, speed)
@@ -1120,6 +1274,11 @@ local function applyStep(c, w, st)
             end
             w.carry = nil
             task.incoming = nil
+        end
+    elseif st.op == 'sell' then
+        if w.carry then
+            sellGoods(c, w.carry.res, w.carry.amount)
+            w.carry = nil
         end
     elseif st.op == 'eat' then
         if w.carry and w.carry.res == 'food' then
@@ -1206,6 +1365,8 @@ function C.tick(c, dt, hours, skipping)
         end
     end
 
+    tickTrade(c, hours)
+
     if c.storehouse then
         c.arrivalTimer = c.arrivalTimer + hours
         local pop = C.population(c) + c.pendingArrivals
@@ -1235,6 +1396,21 @@ function C.simulateWorker(c, wid, dt, anyTime)
     local s = w.assignment and w.assignment ~= 'builder' and c.sites[w.assignment]
     if s and def(s).guard then return end -- guards just keep watch
     if w.prisoner and not s then return end -- locked up
+    if s and def(s).trade then
+        local cycle = def(s).cycle + 2 * C.tripSeconds(c, s.id)
+        w.abstractProgress = w.abstractProgress + dt * speed / cycle
+        while w.abstractProgress >= 1 do
+            w.abstractProgress = w.abstractProgress - 1
+            local res, amount = pickToSell(c)
+            if not res or amount < 1 then
+                w.abstractProgress = 0
+                break
+            end
+            c.stock[res] = c.stock[res] - amount
+            sellGoods(c, res, amount)
+        end
+        return
+    end
     if s then
         local d = def(s)
         local cycle = d.cycle + 2 * C.tripSeconds(c, s.id)
@@ -1385,6 +1561,16 @@ function C.siteStatus(c, sid)
     end
     if d.small then return d.desc or '' end
     return 'Built'
+end
+
+-- A house's room in the interior cell (given out the first time it's entered).
+function C.roomOf(c, sid)
+    c.rooms = c.rooms or {}
+    if not c.rooms[sid] then
+        c.nextRoom = (c.nextRoom or 0) + 1
+        c.rooms[sid] = c.nextRoom
+    end
+    return c.rooms[sid]
 end
 
 function C.drainEvents(c)

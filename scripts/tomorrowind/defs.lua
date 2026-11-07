@@ -87,6 +87,7 @@ defs.utter = {
         stroll = { 'A little walk will do me good.', 'Fine day for it.' },
         indoors = { 'I think I will put my feet up.', 'Time for a little rest inside.' },
         gather = { 'I may as well lend a hand.' },
+        trade = { 'Fresh goods, good prices!', 'Let us see what this fetches.', 'Everything has its price.' },
         ['Resting by the campfire'] = { 'A warm fire is all I need.', 'Is there room by the fire?' },
         ['Reading a book'] = { 'Now, where was I?', 'I must finish that chapter.' },
         ['Having a drink and a chat'] = { 'I could use a drink.', 'Pour me one, will you?' },
@@ -174,6 +175,12 @@ defs.slope = {
     pilingHalfHeight = 290,  -- ex_de_docks_piling.nif is centred, 580 tall (measured in game)
 }
 
+-- Where a building's door is, from vanilla references: offset from the model's
+-- origin, turned by degrees; `interior` is a room in interiors.lua.
+local function hlaaluDoor(x, y, z, degrees, interior, id)
+    return { id = id or 'hlaalu_loaddoor_ 02', offset = { x, y, z }, turn = math.rad(degrees), interior = interior }
+end
+
 -- Buildings.
 --   cost:   materials delivered by haulers before building can start
 --   work:   seconds of builder work to finish once materials are in
@@ -185,6 +192,7 @@ defs.slope = {
 --   scale:  model scale (the vanilla meshes come in odd sizes). Keep every
 --           scale within 0.5..2: saved objects are clamped to that on load.
 --   workFx: shown while someone works there (the smelter's fire)
+--   door:   the building can be entered (see hlaaluDoor)
 --   maxBuilders: how many settlers haul for and build it at once (no limit if unset)
 defs.buildings = {
     storehouse = {
@@ -237,18 +245,32 @@ defs.buildings = {
         -- plinth that goes into the ground (and shows on the downhill side)
         name = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_01.nif', cost = { wood = 40, ingot = 8 }, work = 60,
         beds = 4, footprint = 700, lift = 80,
+        door = hlaaluDoor(14, -4, -17, 92, 'hlaalu_mid'),
         variants = {
             { label = 'Hlaalu House, tall' },
-            { label = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_04.nif' },
-            { label = 'Hlaalu House, with stairs', model = 'meshes/x/ex_hlaalu_b_03.nif' },
-            { label = 'Hlaalu Manor', model = 'meshes/x/ex_hlaalu_b_06.nif' },
-            { label = 'Hlaalu Hall', model = 'meshes/x/ex_hlaalu_b_07.nif' },
-            { label = 'Hlaalu Residence', model = 'meshes/x/ex_hlaalu_b_10.nif' },
-            { label = 'Hlaalu Tower', model = 'meshes/x/ex_hlaalu_b_13.nif', lift = 420 },
-            { label = 'Hlaalu Terrace', model = 'meshes/x/ex_hlaalu_b_17.nif' },
-            { label = 'Timber House', model = 'meshes/x/ex_common_building_01.nif', lift = 400 },
-            { label = 'Dunmer Shack', model = 'meshes/x/ex_de_shack_03.nif', lift = 170 },
-            { label = 'Dunmer Stilt House', model = 'meshes/x/ex_de_shack_05.nif', lift = 370 },
+            { label = 'Hlaalu House', model = 'meshes/x/ex_hlaalu_b_04.nif', door = hlaaluDoor(257, -208, 53, 0, 'hlaalu_small') },
+            { label = 'Hlaalu House, with stairs', model = 'meshes/x/ex_hlaalu_b_03.nif', door = hlaaluDoor(-383, -183, 26, 0, 'hlaalu_small') },
+            { label = 'Hlaalu Manor', model = 'meshes/x/ex_hlaalu_b_06.nif', door = hlaaluDoor(-126, -335, -18, 0, 'hlaalu_large', 'hlaal_loaddoor_01') },
+            { label = 'Hlaalu Hall', model = 'meshes/x/ex_hlaalu_b_07.nif', door = hlaaluDoor(-275, -289, -17, 0, 'hlaalu_large') },
+            { label = 'Hlaalu Residence', model = 'meshes/x/ex_hlaalu_b_10.nif', door = hlaaluDoor(233, -87, -18, 0, 'hlaalu_mid') },
+            { label = 'Hlaalu Tower', model = 'meshes/x/ex_hlaalu_b_13.nif', lift = 420, door = hlaaluDoor(-129, -60, -18, 0, 'hlaalu_mid', 'hlaal_loaddoor_01') },
+            { label = 'Hlaalu Terrace', model = 'meshes/x/ex_hlaalu_b_17.nif', door = hlaaluDoor(425, -200, -18, 0, 'hlaalu_mid') },
+            { label = 'Timber House', model = 'meshes/x/ex_common_building_01.nif', lift = 250,
+              door = hlaaluDoor(125, -100, -150, 0, 'common', 'ex_common_door_01') },
+            { label = 'Dunmer Shack', model = 'meshes/x/ex_de_shack_03.nif', lift = 105,
+              door = hlaaluDoor(186, -47, -5, 270, 'shack', 'ex_de_shack_door') },
+            { label = 'Dunmer Stilt House', model = 'meshes/x/ex_de_shack_05.nif', lift = 370, door = false },
+        },
+    },
+    market = {
+        name = 'Market Stall', model = 'meshes/f/furn_de_ex_table_03.nif', lift = 30,
+        cost = { wood = 25, ingot = 2 }, work = 25, job = 'Trader', slots = 2, cycle = 8, trade = true,
+        footprint = 220, maxBuilders = 4,
+        props = {
+            { decor = 'cart', offset = { 0, 200, 50 } },
+            { decor = 'crate', offset = { -130, 20, 32 } }, { decor = 'crate', offset = { -130, 20, 96 }, turn = 0.5 },
+            { decor = 'crate', offset = { 130, -10, 32 }, turn = 0.2 },
+            { decor = 'orepile', offset = { 135, 70, -15 }, scale = 0.6 },
         },
     },
     warehouse = {
@@ -256,7 +278,22 @@ defs.buildings = {
         storage = 150, footprint = 350, lift = 320, maxBuilders = 4,
     },
 }
-defs.buildOrder = { 'lumber', 'farm', 'mine', 'smelter', 'warehouse', 'house', 'guardpost', 'stockade' }
+defs.buildOrder = { 'lumber', 'farm', 'mine', 'smelter', 'warehouse', 'market', 'house', 'guardpost', 'stockade' }
+
+-- Trade: traders at a market stall sell what's above the `keep` level. Every
+-- unit sold lowers that resource's price by `pressure`, down to `minFactor`;
+-- prices recover by `recover` of the gap per game hour. Caravans pay better and
+-- sell what's on your buy list, up to `supply` of each per visit.
+defs.trade = {
+    prices = { food = 2, wood = 3, ore = 5, ingot = 18 },
+    pressure = { food = 0.004, wood = 0.005, ore = 0.008, ingot = 0.03 },
+    minFactor = 0.3,
+    recover = 0.03,
+    buyMarkup = 1.6,
+    keep = { food = 50, wood = 40, ore = 20, ingot = 10 },
+    step = 10,          -- the ledger's < > change keep and buy levels by this
+    caravan = { everyHours = 48, stayHours = 10, sellBonus = 1.25, supply = 30 },
+}
 
 -- Furnishings: smaller things that make the colony a home. They use the same
 -- construction pipeline as buildings, without scaffolds or foundations, and
@@ -462,6 +499,7 @@ defs.uniform = {
     jobs = {
         Miner = { Helmet = { template = 'netch_leather_boiled_helm', name = "Miner's Hard Hat" } },
         Woodcutter = { Helmet = { template = 'fur_helm', name = "Woodcutter's Fur Cap" } },
+        Trader = { Robe = { template = 'expensive_robe_01', name = "Trader's Robe" } },
         Smelter = { Helmet = { template = 'imperial_chain_coif_helm', name = "Smelter's Coif" } },
         Farmer = { Robe = { template = 'common_robe_02_h', name = "Farmer's Smock" } },
         Builder = { Helmet = { template = 'netch_leather_helm', name = "Builder's Cap" } },
@@ -489,6 +527,7 @@ defs.decorModels = {
     tentLining = 'meshes/tomorrowind/tent_lining.nif',
     tentLargeLining = 'meshes/tomorrowind/tent_large_lining.nif',
     boardPost = 'meshes/x/furn_com_fence_03.nif',
+    cart = 'meshes/f/furn_guarcart00.nif',
     bookA = 'meshes/m/text_octavo_01.nif',
     bookB = 'meshes/m/text_quarto_01.nif',
     bookC = 'meshes/m/text_folio_01.nif',
@@ -498,6 +537,9 @@ defs.smallConstructionLift = 29
 
 -- Materials delivered to a construction site are stacked next to it and
 -- used up as the building goes up. `per` units per object, at most `max`.
+-- Rooms of different houses are this far apart inside the interior cell.
+defs.roomSpacing = 15000
+
 defs.piles = {
     wood = { model = 'log', per = 2, max = 30, layout = 'logs' },
     ore = { model = 'orepile', per = 3, max = 6, layout = 'heaps' },

@@ -10,6 +10,7 @@ local I = require('openmw.interfaces')
 local C = require('scripts.tomorrowind.core.colony')
 local defs = require('scripts.tomorrowind.defs')
 local records = require('scripts.tomorrowind.records')
+local interiors = require('scripts.tomorrowind.interiors')
 
 local WORKER_SCRIPT = 'scripts/tomorrowind/worker.lua'
 local CAPTIVE_SCRIPT = 'scripts/tomorrowind/captive.lua'
@@ -21,7 +22,8 @@ local SITE_INTERVAL = 1 / 30
 
 -- persistent
 local c                      -- colony state (plain table, see core/colony.lua)
-local objs = { sites = {}, workers = {}, decor = {}, threats = {}, sitefx = {}, workfx = {}, indoors = {} }
+local objs = { sites = {}, workers = {}, decor = {}, threats = {}, sitefx = {}, workfx = {}, indoors = {},
+    shells = {}, exits = {}, doors = {}, caravan = {} }
 local ghost                  -- { obj=, kind= } while the player is placing
 local recIds                 -- ids of our runtime records (see records.lua)
 
@@ -37,6 +39,8 @@ local applyGhostMove         -- defined with the placement code below
 local checkThreats           -- defined with the main loop
 local debugOn = defs.debug
 local siteByObj = {}         -- object id -> sid
+local doorByObj = {}         -- object id -> { sid=, exit= }
+local caravanTraderId        -- object id of the trader while a caravan is here
 local workFxUntil = {}       -- sid -> sim time the smelter fire may go out
 local needsMigration = false
 local siteTimer = 0
@@ -44,6 +48,8 @@ local quiet = false          -- no messages (filming)
 local lastKind, lastRemark = {}, {} -- wid -> last task kind, sim time of last remark
 local awayFrom               -- what the colony had when the player left
 
+local doorPoint              -- defined with the workers
+local caravanArrives, caravanLeaves, removeRoom, pushState
 local function log(...)
     print('[Tomorrowind]', ...)
 end
@@ -64,7 +70,15 @@ local function message(text)
 end
 
 local function rebuildIndex()
-    workerByObj, siteByObj = {}, {}
+    workerByObj, siteByObj, doorByObj = {}, {}, {}
+    for sid, o in pairs(objs.doors) do
+        if o:isValid() then doorByObj[o.id] = { sid = sid } end
+    end
+    for sid, list in pairs(objs.exits) do
+        for _, o in ipairs(list) do
+            if o:isValid() then doorByObj[o.id] = { sid = sid, exit = true } end
+        end
+    end
     for wid, o in pairs(objs.workers) do
         if o:isValid() then workerByObj[o.id] = wid end
     end
@@ -92,9 +106,9 @@ end
 
 -- Note: teleport's onGround does nothing for a freshly created object (it
 -- isn't in the scene yet), so heights are always worked out from the land.
-local function placeObject(recordId, pos, yaw, scale)
+local function placeObject(recordId, pos, yaw, scale, cell)
     local o = world.createObject(recordId)
-    o:teleport('', v3(pos), { rotation = util.transform.rotateZ(yaw or 0) })
+    o:teleport(cell or '', v3(pos), { rotation = util.transform.rotateZ(yaw or 0) })
     if scale and scale ~= 1 then o:setScale(scale) end
     return o
 end
@@ -116,6 +130,11 @@ local function siteFloor(sid, p)
     local s = c.sites[sid]
     if s.leveled then return s.pos.z end
     return landHeight(p) or s.pos.z
+end
+
+-- The cell a site's objects go in: furniture indoors is in the interior cell.
+local function siteCell(sid)
+    return c.sites[sid].host and interiors.cell or ''
 end
 
 -- Footprint radius of the finished building: measured from the placement
@@ -381,9 +400,17 @@ local function spawnDecor(sid)
         local rot = util.transform.rotateZ(s.yaw)
         local p = v3(s.pos) + rot * util.vector3(off[1], off[2], off[3])
         local o = world.createObject(prop.light or rec().decor[prop.decor])
-        o:teleport('', p, { rotation = util.transform.rotateZ(s.yaw + (prop.turn or 0)) })
+        o:teleport(siteCell(sid), p, { rotation = util.transform.rotateZ(s.yaw + (prop.turn or 0)) })
         if prop.scale then o:setScale(prop.scale) end
         list[#list + 1] = o
+    end
+    if d.door and not s.host then
+        local rot = util.transform.rotateZ(s.yaw)
+        local at = objectPos(sid) + rot * util.vector3(d.door.offset[1], d.door.offset[2], d.door.offset[3])
+        local door = world.createObject(d.door.id)
+        door:teleport('', at, { rotation = util.transform.rotateZ(s.yaw + d.door.turn) })
+        objs.doors[sid] = door
+        list[#list + 1] = door
     end
     if d.decor == 'lumber' then
         -- a stack of logs beside the chopping stump, and a couple lying loose
@@ -435,7 +462,7 @@ local function setSiteObject(sid)
         or (d.small and rec().constructionSmall) or rec().construction
     -- leveled sites have their floor worked out; everything else sits on the land
     if not s.leveled then s.pos.z = landHeight(v3(s.pos)) or s.pos.z end
-    objs.sites[sid] = placeObject(recordId, objectPos(sid), s.yaw, siteScale(sid))
+    objs.sites[sid] = placeObject(recordId, objectPos(sid), s.yaw, siteScale(sid), siteCell(sid))
     removeDecor(sid)
     if s.built then
         spawnDecor(sid)
@@ -497,6 +524,17 @@ local function tentRoute(from, to)
     return via, to ~= nil
 end
 
+-- The spot just outside a house's door.
+doorPoint = function(sid)
+    local s = c.sites[sid]
+    local d = defs.look(s.kind, s.variant).door
+    local rot = util.transform.rotateZ(s.yaw)
+    local door = objectPos(sid) + rot * util.vector3(d.offset[1], d.offset[2], d.offset[3])
+    local out = util.transform.rotateZ(s.yaw + d.turn) * util.vector3(0, -130, 0)
+    local p = door + out
+    return util.vector3(p.x, p.y, landHeight(p) or s.pos.z)
+end
+
 -- Sends the worker's current step. `moveTo` (optional) is a position the
 -- worker must be moved to first (stuck recovery). Position and facing are
 -- applied in a single teleport: OpenMW rejects a second teleport of the
@@ -522,7 +560,9 @@ local function sendStep(wid, moveTo)
         objs.indoors[wid] = nil
         o.enabled = true
     end
-    if st.inside then
+    local atSite = st.at and c.sites[st.at]
+    local indoorsHere = atSite and atSite.host and (st.op == 'work' or st.op == 'interact' or st.op == 'sleep' or st.op == 'eat')
+    if st.inside or indoorsHere then
         objs.indoors[wid] = c.time + (st.duration or 0)
         o:sendEvent('TMW_Stop')
         o.enabled = false
@@ -542,7 +582,12 @@ local function sendStep(wid, moveTo)
 
     local sid = st.to or st.at or c.storehouse
     local s = c.sites[sid]
-    if s then
+    local hostSite = s and s.host and c.sites[s.host]
+    if hostSite or (s and st.door and defs.look(s.kind, s.variant).door) then
+        -- to the door of the house: the rest happens inside
+        msg.center = doorPoint(hostSite and s.host or sid)
+        msg.standoff, msg.slotAngle = 40, 0
+    elseif s then
         msg.center = v3(s.pos)
         -- around the building to come, not just its scaffold
         local radius = s.built and siteRadius(sid) or math.max(siteRadius(sid), footprintRadius(sid))
@@ -573,7 +618,7 @@ local function sendStep(wid, moveTo)
     local opts
     if st.op == 'work' and s then
         -- face the work target
-        local dir = v3(s.pos) - pos
+        local dir = (msg.center or v3(s.pos)) - pos
         opts = { rotation = util.transform.rotateZ(math.atan2(dir.x, dir.y)) }
     end
     local lying = st.op == 'sleep' and st.onBed and s
@@ -679,6 +724,125 @@ end
 ---------------------------------------------------------------------------
 -- events from the core
 
+---------------------------------------------------------------------------
+-- caravans
+
+local function caravanRemove()
+    for _, o in pairs(objs.caravan) do
+        if o:isValid() then o:remove() end
+    end
+    objs.caravan = {}
+    caravanTraderId = nil
+end
+
+caravanArrives = function(marketId)
+    caravanRemove()
+    local market = c.sites[marketId]
+    local base = types.NPC.records['assumanu mantiti']
+    local rec_ = world.createRecord(types.NPC.createRecordDraft({
+        template = base, name = 'Hlaalu Caravan Trader', isMale = true, class = 'commoner',
+        head = 'b_n_dark elf_m_head_07', hair = 'b_n_dark elf_m_hair_03',
+    }))
+    -- they come walking in from out of town, with a pack guar in tow
+    local a = market.yaw + 2.2
+    local from = v3(market.pos) + util.vector3(math.sin(a) * 1300, math.cos(a) * 1300, 60)
+    local stand = v3(market.pos) + util.transform.rotateZ(market.yaw) * util.vector3(-60, -150, 0)
+    local trader = world.createObject(rec_.id)
+    trader:teleport('', from, { onGround = true })
+    trader:sendEvent('StartAIPackage', { type = 'Travel', destPosition = stand })
+    local guar = world.createObject('guar_pack')
+    guar:teleport('', from + util.vector3(120, -60, 0), { onGround = true })
+    guar:sendEvent('StartAIPackage', { type = 'Follow', target = trader })
+    objs.caravan = { trader = trader, guar = guar }
+    caravanTraderId = trader.id
+end
+
+caravanLeaves = function()
+    caravanRemove()
+end
+
+-- Pack guars get stuck easily: once the trader is at the stall, so is the guar.
+local function caravanGuar()
+    local trader, guar = objs.caravan.trader, objs.caravan.guar
+    if not (trader and guar and trader:isValid() and guar:isValid()) then return end
+    local market = C.marketSite(c)
+    if market and (trader.position - v3(market.pos)):length() < 350 and (guar.position - trader.position):length() > 500 then
+        guar:teleport('', trader.position + util.transform.rotateZ(market.yaw) * util.vector3(170, -60, 40), { onGround = true })
+    end
+end
+
+---------------------------------------------------------------------------
+-- interiors: every house has a room of its own in the interior cell. Its
+-- architecture is copied from a vanilla house when it's first entered; its
+-- furniture stays there, as sites hosted by the house.
+
+local function roomOrigin(sid)
+    return util.vector3(C.roomOf(c, sid) * defs.roomSpacing, 0, 0)
+end
+
+local function roomTransform(piece)
+    local t = util.transform
+    return t.rotateZ(piece[7]) * t.rotateY(piece[6]) * t.rotateX(piece[5])
+end
+
+local function buildRoom(sid)
+    if objs.shells[sid] then return end
+    local s = c.sites[sid]
+    local room = interiors[defs.look(s.kind, s.variant).door.interior]
+    local origin = roomOrigin(sid)
+    local shell, exits = {}, {}
+    local function place(piece)
+        local o = world.createObject(piece[1])
+        o:teleport(interiors.cell, origin + util.vector3(piece[2], piece[3], piece[4]), { rotation = roomTransform(piece) })
+        if piece[8] and piece[8] ~= 1 then o:setScale(piece[8]) end
+        return o
+    end
+    for _, piece in ipairs(room.pieces) do shell[#shell + 1] = place(piece) end
+    for _, piece in ipairs(room.exits) do exits[#exits + 1] = place(piece) end
+    objs.shells[sid], objs.exits[sid] = shell, exits
+    rebuildIndex()
+    log('built room', sid, #shell, 'pieces')
+end
+
+local function enterHouse(sid, actor)
+    local ok, cell = pcall(world.getCellByName, interiors.cell)
+    if not ok or not cell then
+        return message('Enable Tomorrowind.omwaddon in the launcher to enter houses.')
+    end
+    buildRoom(sid)
+    local s = c.sites[sid]
+    local room = interiors[defs.look(s.kind, s.variant).door.interior]
+    objs.insideHost = sid
+    actor:teleport(interiors.cell, roomOrigin(sid), { rotation = util.transform.rotateZ(room.arrive.yaw) })
+    actor:sendEvent('TMW_Face', { yaw = room.arrive.yaw })
+    pushState()
+end
+
+local function leaveHouse(sid, actor)
+    local s = c.sites[sid]
+    local d = defs.look(s.kind, s.variant).door
+    objs.insideHost = nil
+    local yaw = s.yaw + d.turn + math.pi
+    actor:teleport('', doorPoint(sid) + util.vector3(0, 0, 20), { rotation = util.transform.rotateZ(yaw), onGround = true })
+    actor:sendEvent('TMW_Face', { yaw = yaw })
+    pushState()
+end
+
+-- A house is gone: its room goes too (the furniture has its own removal).
+removeRoom = function(sid)
+    if objs.insideHost == sid and player() then
+        local p = player()
+        local s = c.sites[c.storehouse]
+        objs.insideHost = nil
+        p:teleport('', v3(s.pos) + util.vector3(0, -600, 100), { onGround = true })
+    end
+    for _, o in ipairs(objs.shells[sid] or {}) do if o:isValid() then o:remove() end end
+    for _, o in ipairs(objs.exits[sid] or {}) do if o:isValid() then o:remove() end end
+    objs.shells[sid], objs.exits[sid], objs.doors[sid] = nil, nil, nil
+end
+
+---------------------------------------------------------------------------
+
 -- Everyone drops what they're doing and re-plans (alarm / all clear).
 local function replanAll()
     for _, wid in ipairs(c.workerOrder) do
@@ -717,7 +881,12 @@ local function processEvents()
         elseif e.kind == 'built' then
             setSiteObject(e.site)
             log('built', e.site, c.sites[e.site].kind)
+        elseif e.kind == 'caravan_arrived' then
+            caravanArrives(e.site)
+        elseif e.kind == 'caravan_left' then
+            caravanLeaves()
         elseif e.kind == 'site_removed' then
+            removeRoom(e.site)
             local o = objs.sites[e.site]
             if o and o:isValid() then
                 -- what was in a chest goes to the player, not into thin air
@@ -753,12 +922,16 @@ local function snapshot()
         prisoners = C.prisonerCount(c), cells = (C.cells(c)),
         underAttack = C.underAttack(c),
         hour = c.hourOfDay, period = C.period(c), capacity = C.capacity(c),
+        insideHost = objs.insideHost, caravanObj = objs.caravan.trader,
+        gold = C.gold(c), caravan = C.caravanHere(c), market = C.marketSite(c) ~= nil, trade = {},
         workers = {}, sites = {}, options = {},
         storePos = c.storehouse and v3(c.sites[c.storehouse].pos),
     }
     for _, r in ipairs(defs.resourceOrder) do
         snap.stock[r] = c.stock[r]
         snap.available[r] = C.available(c, r)
+        local t = C.tradeOf(c)
+        snap.trade[r] = { sell = C.sellPrice(c, r), buy = C.buyPrice(r), keep = t.keep[r] or 0, want = t.want[r] or 0 }
     end
     for _, wid in ipairs(c.workerOrder) do
         local w = c.workers[wid]
@@ -778,7 +951,7 @@ local function snapshot()
             built = s.built, status = C.siteStatus(c, sid),
             progress = C.siteProgress(c, sid),
             pos = v3(s.pos), radius = siteRadius(sid),
-            obj = objs.sites[sid], yaw = s.yaw, small = defs.buildings[s.kind].small, variant = s.variant,
+            obj = objs.sites[sid], yaw = s.yaw, small = defs.buildings[s.kind].small, variant = s.variant, host = s.host,
         }
     end
     for _, opt in ipairs(C.assignmentOptions(c)) do
@@ -787,7 +960,7 @@ local function snapshot()
     return snap
 end
 
-local function pushState()
+pushState = function()
     local p = player()
     if p then p:sendEvent('TMW_State', snapshot()) end
 end
@@ -850,7 +1023,7 @@ end
 local function noteAway(anyActive)
     if not anyActive then
         if not awayFrom then
-            awayFrom = { time = c.time, stock = {}, built = 0 }
+            awayFrom = { time = c.time, stock = {}, built = 0, gold = C.gold(c) }
             for _, r in ipairs(defs.resourceOrder) do awayFrom.stock[r] = c.stock[r] end
             for _, sid in ipairs(c.siteOrder) do
                 if c.sites[sid].built then awayFrom.built = awayFrom.built + 1 end
@@ -867,6 +1040,8 @@ local function noteAway(anyActive)
         local gained = math.floor(c.stock[r] - was.stock[r])
         if gained > 0 then parts[#parts + 1] = '+' .. gained .. ' ' .. defs.resources[r].name end
     end
+    local earned = math.floor(C.gold(c) - was.gold)
+    if earned > 0 then parts[#parts + 1] = '+' .. earned .. ' gold' end
     local built = -was.built
     for _, sid in ipairs(c.siteOrder) do
         if c.sites[sid].built then built = built + 1 end
@@ -894,6 +1069,7 @@ local function updateWorkers(dt)
     checkDeaths()
     checkThreats()
     updateWorkFx()
+    caravanGuar()
     local active = activeSet()
     local anyActive = false
     for _, wid in ipairs(c.workerOrder) do
@@ -929,7 +1105,8 @@ local function updateWorkers(dt)
             C.simulateWorker(c, wid, offscreenDt)
         end
     end
-    if #c.workerOrder > 0 then noteAway(anyActive) end
+    -- inside one of the colony's own houses isn't away
+    if #c.workerOrder > 0 then noteAway(anyActive or objs.insideHost ~= nil) end
     offscreenDt = 0
 end
 
@@ -949,6 +1126,12 @@ local function migrateSites()
         if c.sites[sid].kind == 'board' then hasBoard = true end
     end
     if not hasBoard and c.storehouse then addBoard() end
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built and not s.host and defs.look(s.kind, s.variant).door and not objs.doors[sid] then
+            setSiteObject(sid)
+        end
+    end
     for _, sid in ipairs(c.siteOrder) do
         local o = objs.sites[sid]
         if c.sites[sid].built and o and o:isValid() and o.recordId ~= lookRecord(c.sites[sid].kind, c.sites[sid].variant) then
@@ -1144,7 +1327,7 @@ applyGhostMove = function()
     ghost.pending = nil
     if ghost.obj:isValid() then
         local lift = defs.look(ghost.kind, ghost.variant).lift or 0
-        pcall(ghost.obj.teleport, ghost.obj, '', e.pos + util.vector3(0, 0, lift), { rotation = util.transform.rotateZ(e.yaw or 0) })
+        pcall(ghost.obj.teleport, ghost.obj, objs.insideHost and interiors.cell or '', e.pos + util.vector3(0, 0, lift), { rotation = util.transform.rotateZ(e.yaw or 0) })
     end
 end
 
@@ -1153,11 +1336,37 @@ local function placeConfirm(e)
     local kind = ghost.kind
     local variant = ghost.variant
     removeGhost()
-    local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, false, { foundation = e.foundation, variant = variant })
+    local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, false, { foundation = e.foundation, variant = variant, host = objs.insideHost })
     s.leveled = true -- e.pos.z is the computed floor level
     s.radius = e.radius
     processEvents()
     message(defs.buildings[kind].name .. ' site placed.')
+    pushState()
+end
+
+local function tradeSet(e)
+    if not c or not defs.trade.prices[e.res] then return end
+    if e.keep then C.setKeep(c, e.res, e.keep) end
+    if e.want then C.setWant(c, e.res, e.want) end
+    pushState()
+end
+
+-- amount > 0: from the treasury to the player; < 0: the other way.
+local function treasury(e)
+    local p = player()
+    if not c or not p then return end
+    local inv = types.Actor.inventory(p)
+    if e.amount > 0 then
+        local n = C.withdraw(c, e.amount)
+        if n > 0 then world.createObject('gold_001', n):moveInto(inv) end
+    else
+        local have = inv:countOf('gold_001')
+        local n = math.min(have, -e.amount)
+        if n > 0 then
+            inv:find('gold_001'):remove(n)
+            C.deposit(c, n)
+        end
+    end
     pushState()
 end
 
@@ -1173,6 +1382,7 @@ end
 local function debugCommand(e)
     if e.cmd == 'give' and c then
         for res, n in pairs(e.amounts or {}) do c.stock[res] = (c.stock[res] or 0) + n end
+        if e.gold then C.deposit(c, e.gold) end
     elseif e.cmd == 'build' and c then
         local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation, variant = e.variant })
         s.leveled, s.radius = e.leveled, e.radius
@@ -1255,6 +1465,26 @@ local function debugCommand(e)
                 break
             end
         end
+    elseif e.cmd == 'enter' and c then
+        for _, sid in ipairs(c.siteOrder) do
+            local site = c.sites[sid]
+            if objs.doors[sid] and (not e.at or (v3(site.pos) - util.vector3(e.at.x, e.at.y, site.pos.z)):length() < 5) then
+                objs.doors[sid]:activateBy(player())
+                break
+            end
+        end
+    elseif e.cmd == 'leave' and c and objs.insideHost then
+        objs.exits[objs.insideHost][1]:activateBy(player())
+    elseif e.cmd == 'caravan' and c then
+        local t = C.tradeOf(c)
+        t.caravanTimer = defs.trade.caravan.everyHours
+        C.tick(c, 0, 0.001)
+        processEvents()
+    elseif e.cmd == 'doorinfo' and c then
+        for _, sid in ipairs(c.siteOrder) do
+            local o = objs.doors[sid]
+            if o and o:isValid() then log('door', sid, c.sites[sid].kind, c.sites[sid].variant, o.position, doorPoint(sid)) end
+        end
     elseif e.cmd == 'movew' and c then
         local o = objs.workers[e.wid]
         if o then o:teleport(o.cell, e.pos, { onGround = true }) end
@@ -1328,6 +1558,26 @@ end
 ---------------------------------------------------------------------------
 -- activation: buildings open the colony panel (settlers just talk)
 
+I.Activation.addHandlerForType(types.Door, function(obj, actor)
+    local door = doorByObj[obj.id]
+    if door and actor.type == types.Player then
+        local s = c and c.sites[door.sid]
+        if s and s.built then
+            core.sound.playSound3d('Door Heavy Open', actor)
+            if door.exit then leaveHouse(door.sid, actor) else enterHouse(door.sid, actor) end
+        end
+        return false
+    end
+end)
+
+-- The caravan's trader opens the trade page.
+I.Activation.addHandlerForType(types.NPC, function(obj, actor)
+    if obj.id == caravanTraderId and actor.type == types.Player then
+        actor:sendEvent('TMW_OpenLedger', { tab = 'trade' })
+        return false
+    end
+end)
+
 I.Activation.addHandlerForType(types.Activator, function(obj, actor)
     if ghost and ghost.obj:isValid() and ghost.obj.id == obj.id then return false end
     local sid = siteByObj[obj.id]
@@ -1356,6 +1606,9 @@ return {
             objs.decor = objs.decor or {}
             objs.threats = objs.threats or {}
             objs.sitefx = objs.sitefx or {}
+            objs.shells, objs.exits, objs.doors = objs.shells or {}, objs.exits or {}, objs.doors or {}
+            objs.caravan = objs.caravan or {}
+            caravanTraderId = objs.caravan.trader and objs.caravan.trader:isValid() and objs.caravan.trader.id or nil
             objs.workfx = objs.workfx or {} -- fires go out on the next update
             -- tasks don't survive a reload: everyone who was asleep indoors gets up
             for wid in pairs(objs.indoors or {}) do
@@ -1390,6 +1643,8 @@ return {
         TMW_PlaceConfirm = placeConfirm,
         TMW_PlaceCancel = removeGhost,
         TMW_RemoveSite = removeSite,
+        TMW_TradeSet = tradeSet,
+        TMW_Treasury = treasury,
         TMW_RequestState = pushState,
         TMW_Debug = debugCommand,
         TMW_Attacked = onAttacked,

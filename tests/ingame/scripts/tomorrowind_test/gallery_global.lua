@@ -21,6 +21,16 @@ return {
                 end
             end
         end,
+        GAL_House = function(e)
+            for _, o in ipairs(spawned) do if o.o:isValid() then o.o:remove() end end
+            spawned = {}
+            local rec = world.createRecord(types.Static.createRecordDraft({ model = e.model }))
+            local o = world.createObject(rec.id)
+            o:teleport('', e.pos)
+            local door = world.createObject(e.door)
+            door:teleport('', e.doorPos, { rotation = util.transform.rotateZ(e.turn) })
+            spawned = { { m = e.model, o = o }, { m = e.door, o = door } }
+        end,
         GAL_Dump = function()
             for _, s in ipairs(spawned) do
                 local b = s.o:getBoundingBox()

@@ -91,3 +91,52 @@ test('a bed costs about the same however you get it', function()
     assert(bed >= house * 0.75 and bed <= house * 1.25, string.format('bed %.0f vs house %.0f', bed, house))
     assert(roll < bed and roll >= house * 0.3, string.format('bedroll %.0f', roll))
 end)
+
+test('a market is worth having, without making everything else pointless', function()
+    -- two woodcutters and a trader: about what a house costs per working day
+    local c = C.new()
+    C.found(c, P(0, 0))
+    C.drainEvents(c)
+    c.stock.food = 100
+    c.stock.wood = 150
+    C.setKeep(c, 'food', 200)
+    C.setKeep(c, 'wood', 0)
+    local ids = {}
+    local market = C.addSite(c, 'market', P(500, 0), 0, true)
+    local w = C.addWorker(c, { name = 'T' })
+    w.offscreen = true
+    C.assign(c, w.id, market.id)
+    ids[1] = w.id
+    local hour = 12
+    for _ = 1, 24 * 3600 / 30 / 10 do
+        hour = (hour + 10 * 30 / 3600) % 24
+        C.setClock(c, hour, 30)
+        C.tick(c, 10, 10 * 30 / 3600)
+        C.simulateWorker(c, ids[1], 10)
+        C.drainEvents(c)
+    end
+    local gold = C.gold(c)
+    assert(gold > 100 and gold < 450, 'gold from 150 Timber in a day: ' .. gold)
+end)
+
+test('dumping ingots stops paying: the price sinks', function()
+    local c = C.new()
+    C.found(c, P(0, 0))
+    C.drainEvents(c)
+    local market = C.addSite(c, 'market', P(500, 0), 0, true)
+    local w = C.addWorker(c, { name = 'T' })
+    w.offscreen = true
+    C.assign(c, w.id, market.id)
+    c.stock.ingot = 150
+    C.setKeep(c, 'ingot', 0)
+    local hour = 12
+    for _ = 1, 24 * 3600 / 30 / 10 do
+        hour = (hour + 10 * 30 / 3600) % 24
+        C.setClock(c, hour, 30)
+        C.tick(c, 10, 10 * 30 / 3600)
+        C.simulateWorker(c, w.id, 10)
+        C.drainEvents(c)
+    end
+    local gold = C.gold(c)
+    assert(gold < 150 * defs.trade.prices.ingot * 0.5, 'far below list price: ' .. gold)
+end)
