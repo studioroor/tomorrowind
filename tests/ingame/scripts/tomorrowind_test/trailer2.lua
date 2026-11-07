@@ -211,40 +211,16 @@ local function furnishInside()
     wall('sconce', math.pi / 2, 40)
 end
 
--- forward from where we came in, at head height
-local function inRoom(d0, d1, side0, side1, h)
+-- One move across the room: from the lectern over the tapestry to the
+-- shrine, edging forward, the camera above the settlers' heads.
+local function panRoom()
     return function(u)
         if self.cell.isExterior or not snap.insideHost then return nil end
         local p = self.position
         local e = ease(u)
-        local cam = p + v3(lerp(side0, side1, e), lerp(d0, d1, e), h or 150)
-        return cam, p + v3(lerp(side0, side1, e) * 0.3, 700, 60)
-    end
-end
-
--- indoors: the camera stays near where we came in (inside the room for sure)
--- and moves part of the way towards what it looks at
-local function lookIn(getTarget, f0, f1, h, side)
-    return function(u)
-        if self.cell.isExterior then return nil end
-        local tg = getTarget()
-        if not tg then return nil end
-        local p = self.position + v3(0, 0, h or 140)
-        local e = ease(u)
-        local cam = p + (tg - p) * lerp(f0, f1, e) + v3(lerp(-(side or 0), side or 0, e), 0, 0)
-        return cam, tg
-    end
-end
-local function siteTarget(kind, up)
-    return function()
-        local s_ = site(kind)
-        return s_ and v3(s_.pos.x, s_.pos.y, s_.pos.z + (up or 60))
-    end
-end
-local function settlerTarget(find)
-    return function()
-        local w = find()
-        return w and w.obj.position + v3(0, 0, 95)
+        local t0, t1, t2 = v3(-150, 270, 70), v3(0, 345, 135), v3(125, 255, 70)
+        local look = t0 * (1 - e) ^ 2 + t1 * (2 * e * (1 - e)) + t2 * e ^ 2
+        return p + v3(lerp(55, -45, e), lerp(5, 85, e), 185), p + look
     end
 end
 
@@ -320,7 +296,7 @@ local SHOTS = {
       end,
       cam = aroundClear(function() return land(75, -1225, 150) end, 1450, 1420, 950, -1.0, 0.05) },
     -- evening at home: settlers reading and praying, candles lit
-    { name = 'home', hour = 20.2, prepare = 6, dur = 7, speed = 1,
+    { name = 'indoors', hour = 20.2, prepare = 6, dur = 8, speed = 1,
       setup = function() dbg({ cmd = 'enter', at = land(HOME[1], HOME[2]) }) end,
       prep = function(s)
           if not s.furnished and not self.cell.isExterior and snap.insideHost then
@@ -328,9 +304,7 @@ local SHOTS = {
               furnishInside()
           end
       end,
-      cam = inRoom(20, 80, -30, 30, 185) },
-    { name = 'shrine', prepare = 1, dur = 5, speed = 1, cam = lookIn(siteTarget('shrine', 80), 0.15, 0.4, 220, 20) },
-    { name = 'reader', prepare = 1, dur = 5, speed = 1, cam = lookIn(settlerTarget(finder('^Reading', '^Praying')), 0.2, 0.4, 220, 20) },
+      cam = panRoom() },
     -- the whole village: title and link
     { name = 'ending', hour = 15, prepare = 8, dur = 9, speed = 1,
       setup = function() dbg({ cmd = 'leave' }) end,

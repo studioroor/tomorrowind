@@ -63,10 +63,11 @@ EDIT_02 = [
     dict(shot='caravan', start=3.5, dur=3.4, caption='Caravans come to trade at your market'),
     dict(shot='stairs', start=1.5, dur=3.0, caption='Build stairs, walkways and rope bridges'),
     dict(shot='bridge', start=2.0, dur=3.5, caption='Build stairs, walkways and rope bridges'),
-    dict(shot='move', start=0.5, dur=4.0, rate=2.0, caption='Move a building: up go the scaffolds, over it slides'),
-    dict(shot='home', start=0.5, dur=3.2, grade=EVENING, hit=True, caption=HOME),
-    dict(shot='shrine', start=1.0, dur=2.6, grade=EVENING, fire=True, caption='Furnish them: rugs, tapestries, candles, shrines'),
-    dict(shot='reader', start=1.0, dur=2.6, grade=EVENING, fire=True, caption='Furnish them: rugs, tapestries, candles, shrines'),
+    dict(shot='move', start=0.3, dur=4.0, rate=2.0, caption='Move a building: up go the scaffolds, over it slides'),
+    # one continuous move round the room: the second clip carries on exactly
+    # where the first leaves off, so only the caption changes
+    dict(shot='indoors', start=0.5, dur=3.2, grade=EVENING, hit=True, fire=True, caption=HOME),
+    dict(shot='indoors', start=3.7, dur=3.4, grade=EVENING, fire=True, caption='Furnish them: rugs, tapestries, candles, shrines'),
     dict(shot='ending', start=0.5, dur=6.0, ending=True, hit=True),
 ]
 CUTS = {
