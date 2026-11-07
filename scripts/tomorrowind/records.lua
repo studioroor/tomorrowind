@@ -68,6 +68,10 @@ local function staticRecord(model)
     return world.createRecord(types.Static.createRecordDraft({ model = model })).id
 end
 
+local function sameModel(a, b)
+    return a and b and a:lower():gsub('\\', '/') == b:lower():gsub('\\', '/')
+end
+
 -- Creates whatever is missing in `ids` (the saved table) and returns it.
 function R.ensure(ids)
     ids = ids or {}
@@ -78,8 +82,13 @@ function R.ensure(ids)
     for key, spec in pairs(TOOLS) do
         if not ids.tools[key] then ids.tools[key] = weaponRecord(spec) end
     end
+    -- a record is remade if defs now use another model (older saves)
     for kind, d in pairs(defs.buildings) do
-        if not ids.buildings[kind] then ids.buildings[kind] = activatorRecord(d.name, d.model) end
+        local id = ids.buildings[kind]
+        local r = id and types.Activator.records[id]
+        if not r or not sameModel(r.model, d.model) then
+            ids.buildings[kind] = activatorRecord(d.name, d.model)
+        end
     end
     if not ids.construction then
         ids.construction = activatorRecord('Construction Site', defs.constructionModel)

@@ -301,7 +301,7 @@ local function stopPlacing(confirm)
         end
         local a = placing.analysis
         send('TMW_PlaceConfirm', {
-            pos = placing.pos, yaw = placing.yaw,
+            pos = placing.pos, yaw = placing.yaw, radius = placing.radius,
             foundation = { wood = a.wood, work = a.work, depth = a.depth },
         })
     else

@@ -20,7 +20,7 @@ local STEP_WATCHDOG = 150
 
 -- persistent
 local c                      -- colony state (plain table, see core/colony.lua)
-local objs = { sites = {}, workers = {}, decor = {}, threats = {} }
+local objs = { sites = {}, workers = {}, decor = {}, threats = {}, sitefx = {}, workfx = {} }
 local ghost                  -- { obj=, kind= } while the player is placing
 local recIds                 -- ids of our runtime records (see records.lua)
 
@@ -35,6 +35,8 @@ local applyGhostMove         -- defined with the placement code below
 local checkThreats           -- defined with the main loop
 local debugOn = defs.debug
 local siteByObj = {}         -- object id -> sid
+local workFxUntil = {}       -- sid -> sim time the smelter fire may go out
+local needsMigration = false
 
 local function log(...)
     print('[Tomorrowind]', ...)
@@ -82,10 +84,93 @@ local function siteRadius(sid)
     return s and defs.buildings[s.kind].footprint or 150
 end
 
-local function placeObject(recordId, pos, yaw, onGround)
+-- Note: teleport's onGround does nothing for a freshly created object (it
+-- isn't in the scene yet), so heights are always worked out from the land.
+local function placeObject(recordId, pos, yaw, scale)
     local o = world.createObject(recordId)
-    o:teleport('', v3(pos), { rotation = util.transform.rotateZ(yaw or 0), onGround = onGround ~= false })
+    o:teleport('', v3(pos), { rotation = util.transform.rotateZ(yaw or 0) })
+    if scale and scale ~= 1 then o:setScale(scale) end
     return o
+end
+
+-- An exterior cell for land height lookups (a freshly created object has
+-- no cell until next frame).
+local function landCell()
+    local store = c and objs.sites[c.storehouse]
+    return (store and store:isValid() and store.cell) or (player() and player().cell)
+end
+
+local function landHeight(p)
+    local ok, h = pcall(core.land.getHeightAt, p, landCell())
+    return ok and h or nil
+end
+
+-- Height of the floor a site's own props stand on.
+local function siteFloor(sid, p)
+    local s = c.sites[sid]
+    if s.leveled then return s.pos.z end
+    return landHeight(p) or s.pos.z
+end
+
+-- Footprint radius of the finished building: measured from the placement
+-- preview, from the finished object, or the defs estimate.
+local function footprintRadius(sid)
+    local s = c.sites[sid]
+    if s.radius then return s.radius end
+    if s.built then return siteRadius(sid) end
+    return defs.buildings[s.kind].footprint * 0.5
+end
+
+local function siteScale(sid)
+    local s = c.sites[sid]
+    if s.built then return defs.buildings[s.kind].scale or 1 end
+    -- the scaffold grows with the building it stands in for
+    return math.max(1, math.min(2, footprintRadius(sid) / defs.scaffoldRadius))
+end
+
+-- Spawns a decoration in the site's frame: local offset (x, y), standing
+-- `lift` above the ground there, turned by `turn` relative to the site.
+local function spawnLocal(sid, decorKey, x, y, lift, turn, scale, onFloor)
+    local s = c.sites[sid]
+    local rot = util.transform.rotateZ(s.yaw)
+    local p = v3(s.pos) + rot * util.vector3(x, y, 0)
+    local ground = onFloor and siteFloor(sid, p) or (landHeight(p) or s.pos.z)
+    local o = world.createObject(rec().decor[decorKey])
+    o:teleport('', util.vector3(p.x, p.y, ground + (lift or 0)), { rotation = util.transform.rotateZ(s.yaw + (turn or 0)) })
+    if scale and scale ~= 1 then o:setScale(scale) end
+    return o
+end
+
+-- Layouts for material piles: where the i-th object of a pile goes,
+-- relative to the pile's anchor. Returns x, y, lift, turn, scale.
+local LOG_SCALE = 2              -- furn_log_01 at this scale: ~108 long, ~26 thick
+local LOG_LAYERS = { 4, 3, 2, 1 }
+local layouts = {}
+layouts.logs = function(i)
+    local perStack = 10
+    local k, j = math.floor((i - 1) / perStack), (i - 1) % perStack
+    local layer = 1
+    while j >= LOG_LAYERS[layer] do j = j - LOG_LAYERS[layer]; layer = layer + 1 end
+    local n = LOG_LAYERS[layer]
+    local jitter = ((i * 37) % 7 - 3) * 0.015
+    return k * 135 + (j - (n - 1) / 2) * 29, ((i * 13) % 5 - 2) * 4, 12 + (layer - 1) * 22, jitter, LOG_SCALE
+end
+layouts.heaps = function(i)
+    local col, row = (i - 1) % 3, math.floor((i - 1) / 3)
+    return col * 110, row * 120, -6, i * 1.3, 0.6
+end
+layouts.plates = function(i)
+    local col, h = math.floor((i - 1) / 6), (i - 1) % 6
+    return col * 60, 0, 2 + h * 10, ((i * 29) % 9 - 4) * 0.08, 2
+end
+
+-- Pile anchors (site frame), beside the footprint.
+local PILE_SIDE = { wood = 0, ore = 230, ingot = -170, food = -300 }
+
+local function spawnPileItem(sid, res, i, anchorX, anchorY)
+    local style = defs.piles[res] or defs.piles.food
+    local x, y, lift, turn, scale = layouts[style.layout](i)
+    return spawnLocal(sid, style.model, anchorX + x, anchorY + y, lift, turn, scale)
 end
 
 local function removeDecor(sid)
@@ -97,24 +182,109 @@ end
 
 -- Timber pilings around the footprint wherever the ground drops away
 -- below a leveled building's floor.
-local function spawnPilings(sid, list)
+local function pilingSpots(sid)
     local s = c.sites[sid]
-    if not s.leveled then return end
-    -- a freshly created object has no cell until next frame; any loaded
-    -- exterior cell in the same worldspace works for height lookups
-    local store = objs.sites[c.storehouse]
-    local cell = (store and store:isValid() and store.cell) or (player() and player().cell)
-    local r = siteRadius(sid) * 0.85
+    local spots = {}
+    if not s.leveled then return spots end
+    local r = footprintRadius(sid) * 0.85
     local count = math.max(8, math.floor(2 * math.pi * r / 160))
     for i = 0, count - 1 do
         local a = i * 2 * math.pi / count
         local p = v3(s.pos) + util.vector3(math.sin(a) * r, math.cos(a) * r, 0)
-        local ok, ground = pcall(core.land.getHeightAt, p, cell)
-        if ok and ground and s.pos.z - ground > defs.slope.hiddenDepth then
-            local o = world.createObject(rec().decor.piling)
-            -- the piling mesh is centred on its origin: top at floor level
-            o:teleport('', util.vector3(p.x, p.y, s.pos.z - defs.slope.pilingHalfHeight), { rotation = util.transform.rotateZ(a) })
-            list[#list + 1] = o
+        local ground = landHeight(p)
+        if ground and s.pos.z - ground > defs.slope.hiddenDepth then
+            spots[#spots + 1] = { x = p.x, y = p.y, a = a }
+        end
+    end
+    return spots
+end
+
+local function spawnPiling(sid, spot)
+    local o = world.createObject(rec().decor.piling)
+    -- the piling mesh is centred on its origin: top at floor level
+    o:teleport('', util.vector3(spot.x, spot.y, c.sites[sid].pos.z - defs.slope.pilingHalfHeight),
+        { rotation = util.transform.rotateZ(spot.a) })
+    return o
+end
+
+-- Timber pilings around the footprint wherever the ground drops away
+-- below a leveled building's floor.
+local function spawnPilings(sid, list)
+    for _, spot in ipairs(pilingSpots(sid)) do list[#list + 1] = spawnPiling(sid, spot) end
+end
+
+local function removeAll(list)
+    for _, o in ipairs(list or {}) do
+        if o:isValid() then o:remove() end
+    end
+end
+
+local function removeSiteFx(sid)
+    local fx = objs.sitefx[sid]
+    if not fx then return end
+    for _, list in pairs(fx.piles or {}) do removeAll(list) end
+    removeAll(fx.pilings)
+    objs.sitefx[sid] = nil
+end
+
+-- Construction made visible: stacks of the delivered materials beside the
+-- site (used up as the building goes up) and, on slopes, the pilings going
+-- in one by one while the ground is leveled.
+local function syncSiteFx(sid)
+    local s = c.sites[sid]
+    local v = s and C.siteVisuals(c, sid)
+    if not v then return end
+    local fx = objs.sitefx[sid] or { piles = {}, pilings = {} }
+    objs.sitefx[sid] = fx
+    local anchorX = footprintRadius(sid) + 110
+    for res, amount in pairs(v.piles) do
+        local style = defs.piles[res] or defs.piles.food
+        local want = math.min(style.max, math.ceil(amount / style.per - 1e-6))
+        local list = fx.piles[res] or {}
+        fx.piles[res] = list
+        while #list > want do
+            local o = table.remove(list)
+            if o:isValid() then o:remove() end
+        end
+        while #list < want do
+            list[#list + 1] = spawnPileItem(sid, res, #list + 1, anchorX, PILE_SIDE[res] or -300)
+        end
+    end
+    if s.leveled then
+        fx.spots = fx.spots or pilingSpots(sid)
+        local want = math.floor(#fx.spots * v.pilings + 1e-6)
+        while #fx.pilings > want do
+            local o = table.remove(fx.pilings)
+            if o:isValid() then o:remove() end
+        end
+        while #fx.pilings < want do
+            fx.pilings[#fx.pilings + 1] = spawnPiling(sid, fx.spots[#fx.pilings + 1])
+        end
+    end
+end
+
+-- The smelter's fire burns while someone is working the forge.
+local function workFxOn(sid, seconds)
+    local s = c.sites[sid]
+    local fxDef = s and s.built and defs.buildings[s.kind].workFx
+    if not fxDef then return end
+    workFxUntil[sid] = math.max(workFxUntil[sid] or 0, c.time + seconds)
+    local o = objs.workfx[sid]
+    if o and o:isValid() then return end
+    local rot = util.transform.rotateZ(s.yaw)
+    local off = fxDef.offset
+    local p = v3(s.pos) + rot * util.vector3(off[1], off[2], 0)
+    o = world.createObject(fxDef.light)
+    o:teleport('', util.vector3(p.x, p.y, siteFloor(sid, p) + off[3]), { rotation = rot })
+    objs.workfx[sid] = o
+end
+
+local function updateWorkFx()
+    for sid, o in pairs(objs.workfx) do
+        if not c.sites[sid] or not workFxUntil[sid] or c.time > workFxUntil[sid] then
+            if o:isValid() then o:remove() end
+            objs.workfx[sid] = nil
+            workFxUntil[sid] = nil
         end
     end
 end
@@ -123,16 +293,40 @@ local function spawnDecor(sid)
     local s = c.sites[sid]
     local d = defs.buildings[s.kind]
     local list = {}
-    spawnPilings(sid, list)
+    -- pilings driven during construction stay; any still missing (the site
+    -- may have finished during a time skip) go in now
+    local fx = objs.sitefx[sid]
+    if fx and fx.spots then
+        for _, o in ipairs(fx.pilings) do list[#list + 1] = o end
+        for i = #fx.pilings + 1, #fx.spots do list[#list + 1] = spawnPiling(sid, fx.spots[i]) end
+        fx.pilings = {}
+    else
+        spawnPilings(sid, list)
+    end
     objs.decor[sid] = list
+    if d.decor == 'lumber' then
+        -- a stack of logs beside the chopping stump, and a couple lying loose
+        for i = 1, 20 do
+            local x, y, lift, turn, scale = layouts.logs(i)
+            list[#list + 1] = spawnLocal(sid, 'log', 280 + x, y, lift, turn, scale)
+        end
+        list[#list + 1] = spawnLocal(sid, 'log', -230, 60, 12, 1.1, LOG_SCALE)
+        list[#list + 1] = spawnLocal(sid, 'log', -210, -90, 12, 1.9, LOG_SCALE)
+        return
+    end
+    if d.decor == 'smelter' then
+        -- the coal bed inside the forge (vanilla smithy layout)
+        list[#list + 1] = spawnLocal(sid, 'coals', 0, 0, 91, 0, 0.69, true)
+        return
+    end
     if d.decor == 'stockade' then
         -- a ring of fence segments around the cell block
         local r, n = 420, 12
         for i = 0, n - 1 do
             local a = s.yaw + i * 2 * math.pi / n
+            local p = v3(s.pos) + util.vector3(math.sin(a) * r, math.cos(a) * r, 0)
             local o = world.createObject(rec().decor.fence)
-            o:teleport('', v3(s.pos) + util.vector3(math.sin(a) * r, math.cos(a) * r, 0),
-                { rotation = util.transform.rotateZ(a + math.pi / 2), onGround = true })
+            o:teleport('', util.vector3(p.x, p.y, landHeight(p) or p.z), { rotation = util.transform.rotateZ(a + math.pi / 2) })
             list[#list + 1] = o
         end
         return
@@ -142,9 +336,9 @@ local function spawnDecor(sid)
     for ix = -2, 2 do
         for iy = -2, 2 do
             if not (ix == 0 and iy == 0) then
-                local off = rot * util.vector3(ix * 110, iy * 110, 0)
+                local p = v3(s.pos) + rot * util.vector3(ix * 110, iy * 110, 0)
                 local o = world.createObject(rec().decor.saltrice)
-                o:teleport('', v3(s.pos) + off, { rotation = util.transform.rotateZ(math.random() * 6.28), onGround = true })
+                o:teleport('', util.vector3(p.x, p.y, landHeight(p) or p.z), { rotation = util.transform.rotateZ(math.random() * 6.28) })
                 list[#list + 1] = o
             end
         end
@@ -155,10 +349,17 @@ local function setSiteObject(sid)
     local s = c.sites[sid]
     local old = objs.sites[sid]
     if old and old:isValid() then old:remove() end
-    local d = defs.buildings[s.kind]
     local recordId = s.built and rec().buildings[s.kind] or rec().construction
-    objs.sites[sid] = placeObject(recordId, s.pos, s.yaw, not s.leveled)
-    if s.built then spawnDecor(sid) end
+    -- leveled sites have their floor worked out; everything else sits on the land
+    if not s.leveled then s.pos.z = landHeight(v3(s.pos)) or s.pos.z end
+    objs.sites[sid] = placeObject(recordId, s.pos, s.yaw, siteScale(sid))
+    removeDecor(sid)
+    if s.built then
+        spawnDecor(sid)
+        removeSiteFx(sid)
+    else
+        syncSiteFx(sid)
+    end
     rebuildIndex()
 end
 
@@ -211,6 +412,12 @@ local function sendStep(wid, moveTo)
         msg.center = v3(s.pos)
         msg.standoff = siteRadius(sid) * 0.8 + 60
         msg.slotAngle = slotAngle(wid, sid)
+    end
+
+    if st.op == 'work' and s then
+        local d = defs.buildings[s.kind]
+        msg.sound = s.built and d.sound or (not s.built and defs.buildSound) or nil
+        if s.built and d.workFx then workFxOn(sid, (st.duration or 5) + 3) end
     end
 
     local pos = moveTo or o.position
@@ -316,6 +523,10 @@ local function processEvents()
             if o and o:isValid() then o:remove() end
             objs.sites[e.site] = nil
             removeDecor(e.site)
+            removeSiteFx(e.site)
+            local fire = objs.workfx[e.site]
+            if fire and fire:isValid() then fire:remove() end
+            objs.workfx[e.site] = nil
             rebuildIndex()
         elseif e.kind == 'msg' then
             message(e.text)
@@ -433,6 +644,10 @@ local function updateWorkers(dt)
     activeTimer = 0
     checkDeaths()
     checkThreats()
+    updateWorkFx()
+    for _, sid in ipairs(c.siteOrder) do
+        if not c.sites[sid].built then syncSiteFx(sid) end
+    end
     local active = activeSet()
     for _, wid in ipairs(c.workerOrder) do
         local w = c.workers[wid]
@@ -461,9 +676,24 @@ local function updateWorkers(dt)
     offscreenDt = 0
 end
 
+-- Older saves: buildings whose model changed get their new look.
+local function migrateSites()
+    for _, sid in ipairs(c.siteOrder) do
+        local o = objs.sites[sid]
+        if c.sites[sid].built and o and o:isValid() and o.recordId ~= rec().buildings[c.sites[sid].kind] then
+            log('updating model of', sid, c.sites[sid].kind)
+            setSiteObject(sid)
+        end
+    end
+end
+
 local function onUpdate(dt)
     applyGhostMove()
     if not c then return end
+    if needsMigration then
+        needsMigration = false
+        migrateSites()
+    end
     local gt = world.getGameTime()
     lastGameTime = lastGameTime or gt
     local hours = math.max(0, (gt - lastGameTime) / 3600)
@@ -613,6 +843,7 @@ local function beginPlace(e)
     local p = player()
     local o = world.createObject(rec().buildings[e.kind])
     o:teleport(p.cell, p.position + util.vector3(0, 0, -5000))
+    if d.scale then o:setScale(d.scale) end
     ghost = { obj = o, kind = e.kind }
     p:sendEvent('TMW_Ghost', { obj = o, kind = e.kind })
 end
@@ -638,6 +869,7 @@ local function placeConfirm(e)
     removeGhost()
     local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, false, { foundation = e.foundation })
     s.leveled = true -- e.pos.z is the computed floor level
+    s.radius = e.radius
     processEvents()
     message(defs.buildings[kind].name .. ' site placed.')
     pushState()
@@ -656,7 +888,8 @@ local function debugCommand(e)
     if e.cmd == 'give' and c then
         for res, n in pairs(e.amounts or {}) do c.stock[res] = (c.stock[res] or 0) + n end
     elseif e.cmd == 'build' and c then
-        local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built)
+        local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation })
+        s.leveled, s.radius = e.leveled, e.radius
         if e.built then setSiteObject(s.id) end
         processEvents()
     elseif e.cmd == 'tp' then
@@ -699,6 +932,33 @@ local function debugCommand(e)
         for _, o in pairs(objs.workers) do
             if o:isValid() then o:sendEvent('TMW_SetDebug', e.on) end
         end
+    elseif e.cmd == 'sitestate' and c then
+        -- test helper: jump a construction site to a stage of its progress
+        for _, sid in ipairs(c.siteOrder) do
+            local site = c.sites[sid]
+            if site.kind == e.kind and not site.built then
+                for res, total in pairs(site.cost) do
+                    site.needs[res] = math.floor(total * (1 - e.delivered) + 0.5)
+                end
+                site.progress = site.work * (e.progress or 0)
+            end
+        end
+    elseif e.cmd == 'fxdump' and c then
+        for _, sid in ipairs(c.siteOrder) do
+            local site = c.sites[sid]
+            local o = objs.sites[sid]
+            local fx = objs.sitefx[sid]
+            local parts = {}
+            for res, list in pairs(fx and fx.piles or {}) do parts[#parts + 1] = res .. '=' .. #list end
+            local box = o and o:isValid() and o:getBoundingBox()
+            local fire = objs.workfx[sid]
+            local objZ = o and o:isValid() and o.position.z or -1
+            log(string.format('fx %s %-10s built=%s z=%.0f land=%.0f half=%s scale=%.2f piles[%s] pilings=%d/%d decor=%d fire=%s | %s', sid, site.kind, tostring(site.built),
+                objZ, landHeight(v3(site.pos)) or -1,
+                box and tostring(box.halfSize) or '?', o and o:isValid() and o.scale or -1, table.concat(parts, ' '),
+                fx and fx.pilings and #fx.pilings or 0, fx and fx.spots and #fx.spots or 0,
+                #(objs.decor[sid] or {}), tostring(fire and fire:isValid()), C.siteStatus(c, sid)))
+        end
     elseif e.cmd == 'dump' then
         log('state', c and C.population(c), c and c.stock.food)
     end
@@ -737,6 +997,10 @@ return {
             objs = data.objs or { sites = {}, workers = {}, decor = {} }
             objs.decor = objs.decor or {}
             objs.threats = objs.threats or {}
+            objs.sitefx = objs.sitefx or {}
+            objs.workfx = objs.workfx or {} -- fires go out on the next update
+            workFxUntil = {}
+            needsMigration = true
             recIds = data.recIds
             ghost = data.ghost
             removeGhost() -- placement does not survive a reload

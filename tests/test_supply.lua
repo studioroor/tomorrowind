@@ -140,3 +140,31 @@ test('off-screen laborers also make missing materials', function()
     for _ = 1, 40 do C.simulateWorker(c, w[1], 10) end
     eq(farm.built, true)
 end)
+
+test('site visuals: delivered materials pile up, then get used up', function()
+    local c, w = colony(1)
+    c.stock.wood = 30
+    local farm = C.addSite(c, 'farm', P(800, 0), 0, false) -- 6 wood, 15 work
+    local v = C.siteVisuals(c, farm.id)
+    eq(v.piles.wood, 0, 'nothing delivered yet')
+    eq(v.pilings, 1, 'flat site: no pilings to drive')
+    farm.needs.wood = 2
+    eq(C.siteVisuals(c, farm.id).piles.wood, 4)
+    farm.needs.wood = 0
+    farm.progress = farm.work / 2
+    eq(C.siteVisuals(c, farm.id).piles.wood, 3, 'half built: half the timber used')
+    farm.progress = farm.work
+    eq(C.siteVisuals(c, farm.id).piles.wood, 0)
+    C.finishSite(c, farm.id)
+    eq(C.siteVisuals(c, farm.id), nil)
+end)
+
+test('site visuals: pilings go in while leveling', function()
+    local c = colony(0)
+    local s = C.addSite(c, 'house', P(800, 0), 0, false, { foundation = { wood = 8, work = 20 } })
+    eq(C.siteVisuals(c, s.id).pilings, 0)
+    s.progress = 10
+    eq(C.siteVisuals(c, s.id).pilings, 0.5)
+    s.progress = 30
+    eq(C.siteVisuals(c, s.id).pilings, 1)
+end)

@@ -57,7 +57,15 @@ name and face.
   too: if ingots are short and so is ore, they mine ore first. If the colony
   has no building that makes it, the site says so ("needs a Woodcutter's Camp").
 - **Construction progress** (materials delivered, leveling and build %)
-  shows in the ledger and as a floating label above nearby sites.
+  shows in the ledger and as a floating label above nearby sites. You can
+  also see it on site: delivered materials are stacked beside the scaffold
+  (logs, ore heaps, metal plates) and get used up as the building rises, and
+  on slopes the pilings go in one by one while the ground is leveled.
+- **Work has sound.** Each tool strike plays a sound for that kind of work:
+  a thunk on wood, a clang on ore, the anvil at the smelter, a soft thud in
+  the paddy. They are set per building in `defs.lua` (`sound = ...`).
+- **The smelter's fire** burns, with its crackle, only while someone is
+  working the forge.
 - Settlers visibly **carry** what they're hauling (planks, ore, scrap metal,
   wheat), and wear a **uniform**: the Hlaalu colony shirt for everyone, plus
   a hard hat for miners, a fur cap for woodcutters, a coif for smelters, a
@@ -123,5 +131,12 @@ scripts/tomorrowind/
 
 ```sh
 luajit tests/run.lua              # simulation core
-tools/playtest.sh /tmp/tmw-run    # scripted in-game run (sandboxed config)
+tools/playtest.sh .playtest/run   # scripted in-game run (sandboxed config)
+
+# other scenes, same harness
+TEST_CONTENT=visuals.omwscripts  tools/playtest.sh .playtest/vis   # views for screenshots
+TEST_CONTENT=saveload.omwscripts tools/playtest.sh .playtest/sl    # save, reload, compare
+TEST_CONTENT=probe.omwscripts    tools/playtest.sh .playtest/probe # measure model sizes
 ```
+
+Runs are silent: the sandbox sets the master volume to 0.

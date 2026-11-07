@@ -16,6 +16,7 @@ local SLOT = Actor.EQUIPMENT_SLOT
 
 local SWING_GROUP = 'weapononehand'
 local SWING_INTERVAL = 1.7
+local IMPACT_DELAY = 0.65    -- 'chop start' to 'chop min hit' in the one-handed attack
 local ARRIVE_DIST = 90
 local STUCK_CHECK = 2.5
 local STUCK_MOVE = 25
@@ -101,6 +102,18 @@ local function turnTowards(target, dt)
     local diff = yawError(target)
     local step = 4 * dt
     self.controls.yawChange = math.max(-step, math.min(step, diff))
+end
+
+-- The tool's impact: a sound picked by the global script for this kind of work.
+local function playImpact(sound)
+    if not sound then return end
+    local lo, hi = sound.pitch and sound.pitch[1] or 1, sound.pitch and sound.pitch[2] or 1
+    local pitch = lo + (hi - lo) * math.random()
+    core.sound.playSound3d(sound.id, self, { volume = sound.volume or 1, pitch = pitch })
+    if debugOn then
+        print(string.format('[Tomorrowind] %s impact %s pitch=%.2f playing=%s', tostring(wid), sound.id, pitch,
+            tostring(core.sound.isSoundPlaying(sound.id, self))))
+    end
 end
 
 local function swing()
@@ -191,6 +204,14 @@ handlers['work'] = {
                 swing()
                 s.swings = (s.swings or 0) + 1
                 s.checkSwing = 0.4
+                s.impactT = IMPACT_DELAY
+            end
+            if s.impactT then
+                s.impactT = s.impactT - dt
+                if s.impactT <= 0 then
+                    s.impactT = nil
+                    playImpact(s.sound)
+                end
             end
             if s.checkSwing then
                 s.checkSwing = s.checkSwing - dt

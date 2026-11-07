@@ -985,4 +985,23 @@ function C.drainEvents(c)
     return evs
 end
 
+-- What a construction site should show physically: how much of each
+-- delivered material is still lying there (it is used up as building work
+-- progresses), and how far the foundation pilings have gone in (0..1,
+-- they go in while the ground is leveled). nil for finished buildings.
+function C.siteVisuals(c, sid)
+    local s = c.sites[sid]
+    if not s or s.built then return nil end
+    local work = siteWork(s)
+    local used = work > 0 and math.min(1, s.progress / work) or 0
+    local v = { piles = {}, pilings = 1 }
+    for res, total in pairs(s.cost or def(s).cost) do
+        local have = total - (s.needs[res] or 0)
+        v.piles[res] = math.max(0, have * (1 - used))
+    end
+    local level = s.levelWork or 0
+    if level > 0 then v.pilings = math.min(1, s.progress / level) end
+    return v
+end
+
 return C

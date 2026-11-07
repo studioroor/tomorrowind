@@ -55,31 +55,46 @@ defs.slope = {
 --   beds:   worker capacity added
 --   job/slots/cycle/output/input: production jobs
 --   tool/anim: what workers swing while working there
+--   sound:  played each time a worker's tool strikes (Sound record id,
+--           with a random pitch in [pitch[1], pitch[2]])
+--   scale:  model scale (the vanilla meshes come in odd sizes). Keep every
+--           scale within 0.5..2: saved objects are clamped to that on load.
+--   workFx: shown while someone works there (the smelter's fire)
 defs.buildings = {
     storehouse = {
         name = 'Storehouse', model = 'meshes/x/ex_de_shack_02.nif', cost = {}, work = 0, beds = 4,
         founding = true, footprint = 350,
     },
     lumber = {
-        name = "Woodcutter's Camp", model = 'meshes/f/furn_log_01.nif', cost = {}, work = 10,
+        -- a chopping stump with a stack of logs beside it
+        name = "Woodcutter's Camp", model = 'meshes/f/flora_treestump_wg_02.nif', scale = 0.5,
+        cost = {}, work = 10,
         job = 'Woodcutter', slots = 3, cycle = 10, output = { wood = 2 },
-        tool = 'axe', footprint = 200,
+        tool = 'axe', footprint = 250, decor = 'lumber',
+        sound = { id = 'Light Armor Hit', pitch = { 0.6, 0.75 }, volume = 0.9 },
     },
     farm = {
         name = 'Saltrice Paddy', model = 'meshes/o/flora_saltrice_02.nif', cost = { wood = 6 }, work = 15,
         job = 'Farmer', slots = 3, cycle = 16, output = { food = 2 },
         tool = 'hoe', footprint = 300,
         decor = 'farm',
+        sound = { id = 'Body Fall Small', pitch = { 1.2, 1.5 }, volume = 0.6 },
     },
     mine = {
         name = 'Ore Vein', model = 'meshes/o/contain_rock_ebony_01.nif', cost = { wood = 10 }, work = 20,
         job = 'Miner', slots = 3, cycle = 12, output = { ore = 2 },
         tool = 'pick', footprint = 200,
+        sound = { id = 'Heavy Armor Hit', pitch = { 0.75, 0.95 }, volume = 0.8 },
     },
     smelter = {
         name = 'Smelter', model = 'meshes/f/furn_de_forge_01.nif', cost = { wood = 10, ore = 6 }, work = 30,
         job = 'Smelter', slots = 2, cycle = 14, input = { ore = 2 }, output = { ingot = 1 },
         tool = 'hammer', footprint = 200,
+        sound = { id = 'Repair', pitch = { 0.95, 1.1 }, volume = 0.9 },
+        decor = 'smelter',
+        -- vanilla smithies put a coal bed and a fire light in this forge
+        -- at these offsets (measured from Morrowind.esm)
+        workFx = { light = 'light_fire_nosmoke_128', offset = { 0, -8, 76 } },
     },
     guardpost = {
         name = 'Guard Post', model = 'meshes/f/furn_banner_hlaalu_01.nif',
@@ -141,11 +156,27 @@ defs.uniform = {
 }
 
 defs.builderTool = 'hammer'
+defs.buildSound = { id = 'Light Armor Hit', pitch = { 0.8, 1.0 }, volume = 0.8 }
 defs.constructionModel = 'meshes/x/ex_de_scaffold_01.nif'
+defs.scaffoldRadius = 163    -- ex_de_scaffold_01.nif half width; scaled up for big buildings
 defs.decorModels = {
     saltrice = 'meshes/o/flora_saltrice_01.nif',
     fence = 'meshes/x/furn_com_fence_01.nif',
     piling = 'meshes/x/ex_de_docks_piling.nif',
+    log = 'meshes/f/furn_log_01.nif',             -- 54 long; used at double size
+    orepile = 'meshes/f/furn_coalpile00.nif',
+    metal = 'meshes/n/ingred_scrap_metal_01.nif',
+    crate = 'meshes/o/contain_crate_01.nif',
+    coals = 'meshes/f/furn_de_firepit_01.nif',
+}
+
+-- Materials delivered to a construction site are stacked next to it and
+-- used up as the building goes up. `per` units per object, at most `max`.
+defs.piles = {
+    wood = { model = 'log', per = 2, max = 30, layout = 'logs' },
+    ore = { model = 'orepile', per = 3, max = 6, layout = 'heaps' },
+    ingot = { model = 'metal', per = 1, max = 12, layout = 'plates' },
+    food = { model = 'crate', per = 5, max = 4, layout = 'heaps' },
 }
 
 return defs

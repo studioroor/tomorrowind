@@ -2,6 +2,7 @@
 # Scripted playtest: starts a new game in a sandboxed config/user-data dir
 # (your own settings and saves are not touched), runs the autotest script,
 # and takes screenshots. Usage: tools/playtest.sh <out-dir> [start-cell]
+# TEST_CONTENT picks the scene (default autotest.omwscripts), SHOTS the screenshot times.
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:?out dir}"
@@ -25,8 +26,8 @@ if grep -q "^content=Tomorrowind.omwscripts" "$HOME/Library/Preferences/openmw/o
 fi
 "$OPENMW" --config "$OUT/cfg" --user-data "$OUT/userdata" \
   ${MOD_ARGS[@]+"${MOD_ARGS[@]}"} \
-  --data "$ROOT/tests/ingame" --content autotest.omwscripts \
-  --skip-menu --start "$CELL" --no-sound --no-grab \
+  --data "$ROOT/tests/ingame" --content "${TEST_CONTENT:-autotest.omwscripts}" \
+  --skip-menu --start "$CELL" --no-grab \
   > "$OUT/stdout.log" 2>&1 &
 PID=$!
 for t in ${SHOTS:-20 45 75 110 140}; do
