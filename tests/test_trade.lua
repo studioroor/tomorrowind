@@ -371,3 +371,24 @@ test('someone with a bed in a house sleeps in it', function()
     C.setClock(c, 23, 30)
     eq(C.nextTask(c, w[1]).site, bed.id)
 end)
+
+test('bought ornaments give their gold back when removed', function()
+    local c = colony(0)
+    c.gold = 10
+    local rug = C.addSite(c, 'rug', P(100, 0), 0, true)
+    rug.price = 20
+    C.removeSite(c, rug.id)
+    eq(C.gold(c), 30)
+end)
+
+test('ornaments that settlers use show up as things to do', function()
+    local c, w = colony(1)
+    C.addSite(c, 'shrine', P(100, 0), 0, true)
+    C.setClock(c, 19.5, 30)
+    local free = defs.downtime.free
+    defs.downtime.free = { leisure = 1 }
+    local t = C.nextTask(c, w[1])
+    defs.downtime.free = free
+    eq(t.kind, 'leisure')
+    eq(t.steps[2].label, 'Praying at the shrine')
+end)

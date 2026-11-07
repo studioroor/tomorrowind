@@ -352,6 +352,14 @@ defs.trade = {
 --               sleepZ; the first is the building's own fields.
 --   rises:      comes up out of the ground while built, like a building
 --   opensLedger: activating it opens the ledger, looking at it shows a summary
+--   group:      which part of the Furnish tab it's in
+--   mount:      'surface' (any floor, roof or table you aim at) or 'wall'
+--               (whatever wall you aim at); otherwise it stands on the ground
+--   depth:      for wall mounts, how far it stands out from the wall
+--   anchor:     'end': it starts where you aim and runs forward
+--   flat:       other things may stand on it (rugs, cushions)
+--   outdoor:    can't be placed inside a house
+--   instant/price: bought with treasury gold, there at once (refunded on removal)
 -- Books lying on a shelf's boards: three per board, turned to fit its depth.
 local function shelfBooks(boards, spread)
     local kinds = { 'bookA', 'bookB', 'bookC' }
@@ -373,7 +381,7 @@ local function furnishing(t)
     return t.key
 end
 defs.furnishOrder = {
-    furnishing({ key = 'campfire', name = 'Campfire', model = 'meshes/f/furn_de_firepit_01.nif',
+    furnishing({ key = 'campfire', group = 'Lights', name = 'Campfire', model = 'meshes/f/furn_de_firepit_01.nif',
         lift = 20, cost = { wood = 4 }, work = 5, desc = 'Settlers eat and rest here',
         props = { { light = 'light_fire_nosmoke_128', offset = { 0, 0, 5 } } },
         variants = {
@@ -382,18 +390,18 @@ defs.furnishOrder = {
               props = { { light = 'light_fire_nosmoke_128', offset = { 0, 0, 25 } } } },
         },
         interact = { label = 'Resting by the campfire', hours = 1, slots = 6, weight = 4, meal = true } }),
-    furnishing({ key = 'lamppost', name = 'Lamp Post', model = 'meshes/f/furn_woodpost_01.nif',
+    furnishing({ key = 'lamppost', group = 'Lights', name = 'Lamp Post', model = 'meshes/f/furn_woodpost_01.nif',
         lift = 60, cost = { wood = 6, ingot = 2 }, work = 6, desc = 'Lights up the night',
         props = { { decor = 'lampArm', offset = { 22, 0, 195 } },
                   { light = 'light_de_streetlight_01_223_s', offset = { 53, 0, 221 } } } }),
-    furnishing({ key = 'lantern', name = 'Paper Lantern', model = 'meshes/f/furn_de_ashl_post.nif',
+    furnishing({ key = 'lantern', group = 'Lights', name = 'Paper Lantern', model = 'meshes/f/furn_de_ashl_post.nif',
         lift = 80, cost = { wood = 3 }, work = 3, desc = 'A small warm light',
         props = { { light = 'light_de_paper_lantern_01', offset = { 0, 0, 170 } } },
         variants = {
             { label = 'Round' },
             { label = 'Long', props = { { light = 'light_de_paper_lantern_04', offset = { 0, 0, 170 } } } },
         } }),
-    furnishing({ key = 'chair', name = 'Chair', model = 'meshes/f/furn_com_chair_01.nif',
+    furnishing({ group = 'Furniture', key = 'chair', name = 'Chair', model = 'meshes/f/furn_com_chair_01.nif',
         lift = 45, cost = { wood = 3 }, work = 3, desc = 'Somewhere to take a break',
         interact = { label = 'Taking a break', hours = 0.5, slots = 1, weight = 1 },
         variants = {
@@ -405,7 +413,7 @@ defs.furnishOrder = {
             { label = 'Dunmer stool', model = 'meshes/f/furn_de_stool_01.nif', lift = 22 },
             { label = 'Outdoor stool', model = 'meshes/f/furn_de_ex_stool_02.nif', lift = 19 },
         } }),
-    furnishing({ key = 'bench', name = 'Bench', model = 'meshes/f/furn_de_ex_bench_01.nif',
+    furnishing({ group = 'Furniture', key = 'bench', name = 'Bench', model = 'meshes/f/furn_de_ex_bench_01.nif',
         lift = 19, cost = { wood = 4 }, work = 4, desc = 'Somewhere to take a break',
         interact = { label = 'Taking a break', hours = 0.5, slots = 2, weight = 1 },
         variants = {
@@ -415,7 +423,7 @@ defs.furnishOrder = {
             { label = 'Dunmer bench', model = 'meshes/f/furn_de_bench_01.nif', lift = 22 },
             { label = 'Long Dunmer bench', model = 'meshes/f/furn_de_bench_03.nif', lift = 23 },
         } }),
-    furnishing({ key = 'table', name = 'Table', model = 'meshes/f/furn_de_ex_table_02.nif',
+    furnishing({ group = 'Furniture', key = 'table', name = 'Table', model = 'meshes/f/furn_de_ex_table_02.nif',
         lift = 32, cost = { wood = 6 }, work = 5, desc = 'For a drink and a chat',
         interact = { label = 'Having a drink and a chat', hours = 0.75, slots = 4, weight = 3, prop = 'cup' },
         variants = {
@@ -427,7 +435,7 @@ defs.furnishOrder = {
             { label = 'Square Dunmer table', model = 'meshes/f/furn_de_table_01.nif', lift = 29 },
             { label = 'Long Dunmer table', model = 'meshes/f/furn_de_table_03.nif', lift = 35 },
         } }),
-    furnishing({ key = 'bookshelf', name = 'Bookshelf', model = 'meshes/f/furn_com_bookshelf_02.nif',
+    furnishing({ group = 'Furniture', key = 'bookshelf', name = 'Bookshelf', model = 'meshes/f/furn_com_bookshelf_02.nif',
         lift = 91, cost = { wood = 10 }, work = 6, desc = 'Settlers read here',
         -- vanilla shelves come empty, so books lie on the boards (heights above
         -- the ground, measured in game on bare shelves: tests/ingame photo scene)
@@ -439,7 +447,7 @@ defs.furnishOrder = {
             { label = 'Long Dunmer bookshelf', model = 'meshes/f/furn_de_bookshelf_02.nif', lift = 80, props = shelfBooks({ 76, 28 }, 70) },
         },
         interact = { label = 'Reading a book', hours = 1, slots = 2, weight = 3, prop = 'book' } }),
-    furnishing({ key = 'chest', name = 'Chest', model = 'meshes/o/contain_com_chest_01.nif',
+    furnishing({ group = 'Furniture', key = 'chest', name = 'Chest', model = 'meshes/o/contain_com_chest_01.nif',
         lift = 17, cost = { wood = 8 }, work = 4, desc = 'Stores your things', objectType = 'container', capacity = 400,
         interact = { label = 'Looking through a chest', hours = 0.25, slots = 1, weight = 1 },
         variants = {
@@ -450,9 +458,9 @@ defs.furnishOrder = {
             { label = 'Old chest', model = 'meshes/o/contain_chest10.nif', lift = 18 },
             { label = 'Small chest', model = 'meshes/o/contain_chest_small_01.nif', lift = 6 },
         } }),
-    furnishing({ key = 'bedroll', name = 'Bedroll', model = 'meshes/f/active_de_bedroll.nif',
+    furnishing({ group = 'Furniture', key = 'bedroll', name = 'Bedroll', model = 'meshes/f/active_de_bedroll.nif',
         lift = 13, cost = { wood = 8 }, work = 3, beds = 1, sleepOn = true, sleepZ = 26, desc = '+1 bed' }),
-    furnishing({ key = 'bed', name = 'Bed', model = 'meshes/f/active_de_bed_01.nif',
+    furnishing({ group = 'Furniture', key = 'bed', name = 'Bed', model = 'meshes/f/active_de_bed_01.nif',
         lift = 31, cost = { wood = 14, ingot = 1 }, work = 6, beds = 1, sleepOn = true, sleepZ = 60, desc = '+1 bed',
         variants = {
             { label = 'Dunmer bed' },
@@ -469,7 +477,7 @@ defs.furnishOrder = {
         } }),
     -- scaled up so its door is wide enough for the navmesh (routes go through
     -- it): meshes come from tools/make_tent_meshes.py
-    furnishing({ key = 'tent', name = 'Tent', model = 'meshes/tomorrowind/tent.nif', footprint = 360,
+    furnishing({ key = 'tent', group = 'Structures', name = 'Tent', model = 'meshes/tomorrowind/tent.nif', footprint = 360,
         scale = 1.3, lift = 221, cost = { wood = 20 }, work = 12, hollow = true, rises = true, maxBuilders = 4,
         desc = 'Put beds and furniture inside',
         -- the outside mesh is one-sided: this lines it from the inside
@@ -480,25 +488,129 @@ defs.furnishOrder = {
             { label = 'Large tent', model = 'meshes/tomorrowind/tent_large.nif', scale = 1.1, lift = 200,
               props = { { decor = 'tentLargeLining', offset = { 0, 0, 150 }, scale = 1 } } },
         } }),
-    furnishing({ key = 'fence', name = 'Wooden Fence', model = 'meshes/x/furn_com_fence_02.nif',
+    furnishing({ key = 'fence', group = 'Structures', name = 'Wooden Fence', model = 'meshes/x/furn_com_fence_02.nif',
         lift = 120, cost = { wood = 3 }, work = 3, segment = { half = 132 }, desc = 'Snaps to walls and fences' }),
-    furnishing({ key = 'wall', name = 'Stone Wall', model = 'meshes/x/ex_drystonewall_s_01.nif',
+    furnishing({ key = 'wall', group = 'Structures', name = 'Stone Wall', model = 'meshes/x/ex_drystonewall_s_01.nif',
         lift = 90, cost = { ore = 4 }, work = 6, segment = { half = 126 }, desc = 'Snaps to walls and fences',
         variants = {
             { label = 'Dry stone' },
             { label = 'Redoran', model = 'meshes/x/ex_redwall_straight_01.nif', lift = 150 },
             { label = 'Hlaalu, tall', model = 'meshes/x/ex_hlaalu_wall_01.nif', lift = 220 },
         } }),
-    furnishing({ key = 'gate', name = 'Gate', model = 'meshes/x/ex_de_sn_gate.nif', objectType = 'door',
+    furnishing({ key = 'gate', group = 'Structures', name = 'Gate', model = 'meshes/x/ex_de_sn_gate.nif', objectType = 'door',
         template = 'ex_de_sn_gate', lift = 80, cost = { wood = 6, ingot = 2 }, work = 6,
         segment = { half = 64, at = 63 }, desc = 'Opens for you and your settlers' }),
+    -- on any surface: roofs, ledges, ground. Walkways and bridges start where you
+    -- aim and run forward; walkway planks snap together level.
+    furnishing({ key = 'walkway', group = 'Structures', name = 'Walkway', model = 'meshes/x/ex_de_shack_plank_01.nif',
+        mount = 'surface', outdoor = true, anchor = 'end', lift = 9, cost = { wood = 2 }, work = 3,
+        segment = { half = 124, alongY = true, level = true }, desc = 'Planks to walk on, roof to roof',
+        variants = {
+            { label = 'Plank walkway' },
+            { label = 'Short plank walkway', model = 'meshes/x/ex_de_shack_plank_02.nif', segment = { half = 77, alongY = true, level = true } },
+            { label = 'Long plank walkway', model = 'meshes/x/ex_de_shack_plank_04.nif', lift = 4, segment = { half = 157, alongY = true, level = true } },
+        } }),
+    furnishing({ key = 'ropebridge', group = 'Structures', name = 'Rope Bridge', model = 'meshes/x/ex_ropebridge_512_01.nif',
+        mount = 'surface', outdoor = true, anchor = 'end', lift = 0, cost = { wood = 10 }, work = 10, footprint = 200,
+        segment = { half = 518, level = true }, maxBuilders = 3, desc = 'Spans a gap between two heights',
+        variants = {
+            { label = 'Rope bridge, 5 yards' },
+            { label = 'Rope bridge, 10 yards', model = 'meshes/x/ex_ropebridge_1024_01.nif', cost = { wood = 18 }, segment = { half = 1030, level = true } },
+            { label = 'Rope bridge, 20 yards', model = 'meshes/x/ex_ropebridge_2048_01.nif', cost = { wood = 32 }, segment = { half = 2053, level = true } },
+        } }),
+    furnishing({ key = 'stairs', group = 'Structures', name = 'Stairs', model = 'meshes/x/ex_de_shack_steps_01.nif',
+        mount = 'surface', outdoor = true, lift = 143, cost = { wood = 6 }, work = 5, footprint = 160, desc = 'Up to a door or a roof',
+        variants = {
+            { label = 'Wooden steps' },
+            { label = 'Dock steps', model = 'meshes/x/ex_de_docks_steps_01.nif', lift = 78 },
+            { label = 'Stone steps', model = 'meshes/x/ex_hlaalu_steps_03.nif', lift = 192, footprint = 220, cost = { ore = 6 } },
+            { label = 'Tall stone steps', model = 'meshes/x/ex_hlaalu_steps_05.nif', lift = 320, footprint = 300, cost = { ore = 10 } },
+        } }),
+    -- lights and ornaments are bought: paid from the treasury, there at once
+    furnishing({ key = 'candle', group = 'Lights', name = 'Candles', model = 'meshes/l/light_de_candle_07.nif',
+        mount = 'surface', instant = true, price = 8, cost = {}, work = 0, lift = 17, desc = 'On a table, a shelf or the floor',
+        props = { { light = 'light_de_candle_07_64', offset = { 0, 0, 0 } } },
+        variants = {
+            { label = 'Candle cluster' },
+            { label = 'Tall candle', model = 'meshes/l/light_de_candle_18.nif', props = { { light = 'light_de_candle_18_64', offset = { 0, 0, 0 } } } },
+            { label = 'Red candle', model = 'meshes/l/light_de_candle_red_01.nif', props = { { light = 'light_de_candle_red_01_64', offset = { 0, 0, 0 } } } },
+        } }),
+    furnishing({ key = 'sconce', group = 'Lights', name = 'Wall Sconce', model = 'meshes/l/light_com_sconce_01.nif',
+        mount = 'wall', instant = true, price = 20, cost = {}, work = 0, lift = 0, depth = 6, desc = 'A lamp on the wall',
+        props = { { light = 'light_com_sconce_01_77', offset = { 0, 0, 0 } } } }),
+    furnishing({ key = 'rug', group = 'Decor', name = 'Rug', model = 'meshes/f/furn_rug_01.nif',
+        mount = 'surface', flat = true, instant = true, price = 20, cost = {}, work = 0, lift = 1, desc = 'Underfoot',
+        variants = {
+            { label = 'Rug, red' }, { label = 'Rug, blue', model = 'meshes/f/furn_rug_02.nif' },
+            { label = 'Rug, green', model = 'meshes/f/furn_rug_03.nif' }, { label = 'Rug, brown', model = 'meshes/f/furn_rug_04.nif' },
+            { label = 'Large rug', model = 'meshes/f/furn_rug_big_01.nif', price = 40, lift = -2 },
+            { label = 'Large rug, patterned', model = 'meshes/f/furn_rug_big_03.nif', price = 40, lift = -2 },
+            { label = 'Large rug, runner', model = 'meshes/f/furn_rug_big_05.nif', price = 40, lift = 1 },
+            { label = 'Large rug, dark', model = 'meshes/f/furn_rug_big_08.nif', price = 40, lift = -2 },
+        } }),
+    furnishing({ key = 'tapestry', group = 'Decor', name = 'Tapestry', model = 'meshes/f/furn_de_tapestry_01.nif',
+        mount = 'wall', instant = true, price = 40, cost = {}, work = 0, lift = 96, depth = 4, desc = 'For a bare wall',
+        variants = {
+            { label = 'Dunmer tapestry' }, { label = 'Dunmer tapestry, blue', model = 'meshes/f/furn_de_tapestry_04.nif' },
+            { label = 'Dunmer tapestry, gold', model = 'meshes/f/furn_de_tapestry_08.nif' },
+            { label = 'Dunmer tapestry, dark', model = 'meshes/f/furn_de_tapestry_12.nif' },
+            { label = 'Imperial tapestry', model = 'meshes/f/furn_com_tapestry_01.nif', lift = 90, depth = 3 },
+            { label = 'Imperial tapestry, green', model = 'meshes/f/furn_com_tapestry_03.nif', lift = 90, depth = 3 },
+        } }),
+    furnishing({ key = 'crest', group = 'Decor', name = 'Coat of Arms', model = 'meshes/f/furn_com_coatofarms_01.nif',
+        mount = 'wall', instant = true, price = 60, cost = {}, work = 0, lift = 0, depth = 3, scale = 2, desc = 'House colours',
+        variants = { { label = 'Shield' }, { label = 'Crest', model = 'meshes/f/furn_com_coatofarms_02.nif' } } }),
+    furnishing({ key = 'plant', group = 'Decor', name = 'Plant', model = 'meshes/f/furn_pottedplant.nif',
+        mount = 'surface', instant = true, price = 15, cost = {}, work = 0, lift = 16, desc = 'A bit of green',
+        variants = {
+            { label = 'Potted plant' },
+            { label = 'Small planter', model = 'meshes/f/furn_planter_01.nif', lift = 0 },
+            { label = 'Planter', model = 'meshes/f/furn_planter_02.nif', lift = 0, price = 25 },
+            { label = 'Large planter', model = 'meshes/f/furn_planter_03.nif', lift = 0, price = 35 },
+            { label = 'Square planter', model = 'meshes/f/furn_com_planter.nif', lift = 17 },
+        } }),
+    furnishing({ key = 'urn', group = 'Decor', name = 'Urn', model = 'meshes/o/contain_urn_01.nif',
+        mount = 'surface', instant = true, price = 25, cost = {}, work = 0, lift = 49, desc = 'Fine Dunmer pottery',
+        variants = {
+            { label = 'Urn' }, { label = 'Round urn', model = 'meshes/o/contain_urn_03.nif', lift = 42 },
+            { label = 'Tall urn', model = 'meshes/o/contain_urn_05.nif', lift = 57 },
+        } }),
+    furnishing({ key = 'cushion', group = 'Decor', name = 'Cushion', model = 'meshes/f/furn_cushion_square_01.nif',
+        mount = 'surface', flat = true, instant = true, price = 10, cost = {}, work = 0, lift = 0, desc = 'Somewhere soft to sit',
+        interact = { label = 'Sitting on a cushion', hours = 0.5, slots = 1, weight = 1 },
+        variants = { { label = 'Square cushion' }, { label = 'Round cushion', model = 'meshes/f/furn_cushion_round_01.nif' } } }),
+    furnishing({ key = 'shrine', group = 'Decor', name = 'Shrine', model = 'meshes/f/furn_shrine_tribunal_01.nif',
+        mount = 'surface', instant = true, price = 150, cost = {}, work = 0, lift = 11, desc = 'Settlers pray here',
+        interact = { label = 'Praying at the shrine', hours = 0.5, slots = 1, weight = 2 },
+        variants = { { label = 'Shrine of the Tribunal' }, { label = 'Shrine of Vivec', model = 'meshes/f/furn_shrine_vivec_01.nif' } } }),
+    furnishing({ key = 'lectern', group = 'Decor', name = 'Lectern', model = 'meshes/f/furn_de_lecturn.nif',
+        instant = true, price = 40, cost = {}, work = 0, lift = 58, desc = 'Settlers read here',
+        interact = { label = 'Reading at the lectern', hours = 0.75, slots = 1, weight = 2, prop = 'book' } }),
+    furnishing({ key = 'loom', group = 'Decor', name = 'Loom', model = 'meshes/f/furn_de_loom_01.nif',
+        instant = true, price = 50, cost = {}, work = 0, lift = 52, desc = 'Settlers weave here',
+        interact = { label = 'Weaving', hours = 1, slots = 1, weight = 2 },
+        variants = { { label = 'Loom' }, { label = 'Spinning wheel', model = 'meshes/f/furn_spinningwheel_01.nif', lift = 21,
+            interact = { label = 'Spinning yarn', hours = 1, slots = 1, weight = 2 } } } }),
+    furnishing({ key = 'dummy', group = 'Decor', name = 'Practice Dummy', model = 'meshes/f/furn_practice_dummy.nif',
+        instant = true, price = 25, cost = {}, work = 0, lift = 95, desc = 'Settlers train here',
+        interact = { label = 'Practising with a sword', hours = 0.5, slots = 1, weight = 1 } }),
+    furnishing({ key = 'stores', group = 'Decor', name = 'Stores', model = 'meshes/f/furn_de_winerack_01.nif',
+        instant = true, price = 30, cost = {}, work = 0, lift = 78, desc = 'Racks and barrels',
+        variants = {
+            { label = 'Wine rack' }, { label = 'Keg stand', model = 'meshes/f/furn_de_kegstand.nif', lift = 63 },
+            { label = 'Cauldron', model = 'meshes/f/furn_com_cauldron_01.nif', lift = 44, price = 20 },
+            { label = 'Basket', model = 'meshes/f/furn_basket_01.nif', lift = 8, price = 10 },
+            { label = 'Screen', model = 'meshes/f/furn_wallscreen_01.nif', lift = 82 },
+        } }),
     -- comes with the colony; can be moved by removing it and building another
-    furnishing({ key = 'board', name = 'Colony Board', model = 'meshes/f/furn_de_banner_book_01.nif',
+    furnishing({ key = 'board', group = 'Structures', name = 'Colony Board', model = 'meshes/f/furn_de_banner_book_01.nif',
         scale = 2, lift = 175, cost = { wood = 4 }, work = 4, opensLedger = true, desc = 'Look at it up close for a colony summary',
         props = { { decor = 'boardPost', offset = { -88, 0, 130 } }, { decor = 'boardPost', offset = { 88, 0, 130 } } } }),
 }
 
 -- Held in the hand during an interaction (like carried goods).
+defs.furnishGroups = { 'Furniture', 'Lights', 'Decor', 'Structures' }
+
 defs.propModels = {
     book = 'meshes/m/text_octavo_01.nif',
     cup = 'meshes/m/misc_de_goblet_01.nif',

@@ -137,6 +137,16 @@ it and press **Delete**) gives its materials back.
 - **Beds and bedrolls** add a bed each, and settlers visibly sleep on them.
 - **Tents** can be walked into, and you can place furniture inside.
 - **Chests** are real containers. Removing one hands you what's in it.
+- The tab has four parts: **Furniture**, **Lights**, **Decor** and **Structures**.
+- **Stairs, walkways and rope bridges** go on any surface you aim at, roofs
+  included. Walkways and bridges start where you aim and run forward, and
+  walkway planks snap together at the same height, so you can span from roof
+  to roof.
+- **Lights and decor** (candles, wall sconces, rugs, tapestries, coats of arms,
+  plants, urns, cushions, shrines, a lectern, a loom, a practice dummy, stores)
+  are bought with treasury gold and appear at once. Wall pieces go on whatever
+  wall you aim at. Removing them refunds the gold. Settlers pray at shrines,
+  read at the lectern, weave, and practise on the dummy.
 - **Fences, walls and gates** snap together end to end, and bend around the
   joint with Z and X, keeping the bend for the next piece: walls can curve. Routes go around stone
   walls and through gates, but they don't see fences: settlers who walk into

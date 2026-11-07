@@ -1628,6 +1628,10 @@ local function placeConfirm(e)
     local kind = ghost.kind
     local variant = ghost.variant
     local moving = ghost.moving
+    local look = defs.look(kind, variant)
+    if look.price and C.gold(c) < look.price then
+        return message(string.format('That costs %d gold; the treasury has %d.', look.price, math.floor(C.gold(c))))
+    end
     removeGhost()
     if moving then
         if C.startMove(c, moving, plain(e.pos), e.yaw or 0, e.foundation, true, e.radius) then
@@ -1636,11 +1640,18 @@ local function placeConfirm(e)
         end
         return pushState()
     end
-    local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, false, { foundation = e.foundation, variant = variant, host = objs.insideHost })
+    local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, look.instant or false,
+        { foundation = e.foundation, variant = variant, host = objs.insideHost })
     s.leveled = true -- e.pos.z is the computed floor level
     s.radius = e.radius
+    if look.price then
+        -- bought: paid from the treasury and there at once
+        c.gold = C.gold(c) - look.price
+        s.price = look.price
+    end
+    if s.built then setSiteObject(s.id) end
     processEvents()
-    message(defs.buildings[kind].name .. ' site placed.')
+    message(look.instant and (look.label or defs.buildings[kind].name) .. ' bought.' or defs.buildings[kind].name .. ' site placed.')
     pushState()
 end
 

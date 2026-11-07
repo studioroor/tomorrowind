@@ -414,6 +414,7 @@ function C.removeSite(c, sid)
             end
         end
     end
+    if s.price and not s.free then c.gold = C.gold(c) + s.price end -- bought: the gold comes back
     for _, wid in ipairs(c.workerOrder) do
         if c.workers[wid].bed == sid then c.workers[wid].bed = nil end
     end

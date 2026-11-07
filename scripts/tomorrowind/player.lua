@@ -68,11 +68,12 @@ end
 
 local function resLabel(res) return defs.resources[res].name end
 
-local function costText(cost)
+local function costText(cost, price)
     local parts = {}
     for _, r in ipairs(defs.resourceOrder) do
         if cost[r] then parts[#parts + 1] = cost[r] .. ' ' .. resLabel(r) end
     end
+    if price then parts[#parts + 1] = price .. ' gold' end
     return #parts > 0 and table.concat(parts, ', ') or 'free'
 end
 
@@ -80,6 +81,7 @@ end
 -- ledger
 
 local closeLedger -- forward
+local refreshLedger -- forward
 local startMoving -- forward
 
 local function send(name, data) core.sendGlobalEvent(name, data or {}) end
@@ -179,11 +181,11 @@ local function workersTab()
     return items
 end
 
-local function canAfford(cost)
+local function canAfford(cost, price)
     for r, n in pairs(cost) do
         if (snap.available[r] or 0) < n then return false end
     end
-    return true
+    return not price or (snap.gold or 0) >= price
 end
 
 local startPlacing -- forward
@@ -222,19 +224,28 @@ local function buildTab()
 end
 
 outdoorsOnly = function(d)
-    return d.hollow or d.segment or d.rises or d.opensLedger
+    return d.hollow or d.segment or d.rises or d.opensLedger or d.outdoor
 end
+
+local furnishGroup = defs.furnishGroups[1]
 
 local function furnishTab()
     local items = {
         row({ text('Furnishing', 190, true), text('Materials', 230, true), text('', 240, true) }),
     }
+    local groups = {}
+    for _, g in ipairs(defs.furnishGroups) do
+        groups[#groups + 1] = button(g, function() furnishGroup = g; refreshLedger() end, g == furnishGroup)
+        groups[#groups + 1] = gap(4, 1)
+    end
+    table.insert(items, 1, row(groups))
+    table.insert(items, 2, gap(1, 6))
     if snap.insideHost then items[#items + 1] = text('Placing inside this house.', nil, true) end
     for _, kind in ipairs(defs.furnishOrder) do
         local d = defs.buildings[kind]
-        if not (snap.insideHost and outdoorsOnly(d)) then
-            local cost = costText(d.cost)
-            if not canAfford(d.cost) then cost = cost .. ' (short)' end
+        if d.group == furnishGroup and not (snap.insideHost and outdoorsOnly(d)) then
+            local cost = costText(d.cost, d.price)
+            if not canAfford(d.cost, d.price) then cost = cost .. ' (short)' end
             items[#items + 1] = row({
                 text(d.name, 190), text(cost, 230), text(d.desc or '', 240),
                 button('Place', function() startPlacing(kind) end),
@@ -242,7 +253,7 @@ local function furnishTab()
         end
     end
     items[#items + 1] = gap(1, 8)
-    items[#items + 1] = text('Settlers use these in their free time. Removing one gives its materials back.')
+    items[#items + 1] = text('Settlers use many of these in their free time. Removing one gives everything back.')
     return items
 end
 
@@ -328,7 +339,7 @@ local function ledgerLayout()
     }
 end
 
-local function refreshLedger()
+refreshLedger = function()
     if ledger then
         ledger.layout = ledgerLayout()
         ledger:update()
@@ -478,6 +489,23 @@ local function aimAtFloor()
     if res.hit and res.hitNormal and res.hitNormal.z > 0.7 then return res.hitPos end
 end
 
+-- Any surface: roofs, ledges, tables, walls. `mount` 'surface' wants
+-- something facing up, 'wall' something upright. Returns the point and the
+-- surface's normal.
+local function aimAtSurface(mount)
+    if placing.forcedAim then return placing.forcedAim, placing.forcedNormal or util.vector3(0, 0, 1) end
+    local from = camera.getPosition()
+    local dir = camera.viewportToWorldVector(v2(0.5, 0.5))
+    local reach = snap.insideHost and 1500 or 4000
+    local res = nearby.castRay(from, from + dir * reach, {
+        collisionType = nearby.COLLISION_TYPE.World + nearby.COLLISION_TYPE.HeightMap, ignore = placing.obj })
+    if not res.hit or not res.hitNormal then return nil end
+    local n = res.hitNormal
+    if mount == 'wall' and math.abs(n.z) > 0.35 then return nil end
+    if mount ~= 'wall' and n.z < 0.6 then return nil end
+    return res.hitPos, n
+end
+
 -- Physics check for real obstructions (trees, rocks, houses) under the
 -- footprint: rays straight down, ignoring the preview building and actors.
 local function obstruction(pos, r, top, bottom)
@@ -511,6 +539,10 @@ end
 -- the obstruction rays, so a lantern can stand right next to a wall.
 local function tooClose(d, pos, r, s)
     local other = defs.buildings[s.kind]
+    -- rugs and wall hangings go with anything, and anything goes on a rug
+    if d.flat or d.mount == 'wall' or other.flat or other.mount == 'wall' then return false end
+    -- stairs, walkways and bridges are made to lean on and run past things
+    if d.group == 'Structures' and d.mount or other.group == 'Structures' and other.mount then return false end
     if s.id == placing.moving or (placing.moving and s.kind == 'salvage') then return false end
     if s.host ~= snap.insideHost then return false end -- another place entirely
     if snap.insideHost then return dist2d(pos, s.pos) < (s.radius + r) * 0.6 end
@@ -528,8 +560,14 @@ local function validate(pos, dt)
     local r, height = ghostSize()
     placing.radius = r
     local a
-    if snap.insideHost then
-        placing.analysis = { ok = true, level = pos.z + placing.raise, low = pos.z, high = pos.z, depth = 0, wood = 0, work = 0 }
+    if snap.insideHost or d.mount then
+        -- on whatever surface was aimed at: it stands where it's put
+        -- (indoors there is no water: a floor may sit below sea level)
+        placing.analysis = { ok = snap.insideHost ~= nil or pos.z >= -20, reason = 'under water', level = pos.z + placing.raise, low = pos.z, high = pos.z, depth = 0, wood = 0, work = 0 }
+        if not placing.analysis.ok then return false, 'under water' end
+        if not snap.insideHost and snap.storePos and dist2d(pos, snap.storePos) > COLONY_RADIUS then
+            return false, 'too far from the storehouse'
+        end
         for _, s in ipairs(snap.sites or {}) do
             if tooClose(d, pos, r, s) then return false, 'too close to the ' .. s.name end
         end
@@ -579,26 +617,29 @@ end
 -- one it attaches to, so walls can curve.
 local SNAP_RANGE = 180
 local function snapSegment(d, hit)
-    local best, bestD, bestYaw
+    local best, bestD, bestYaw, bestZ
     local mine = d.segment
     for _, s in ipairs(snap.sites or {}) do
         local other = defs.look(s.kind, s.variant).segment
-        if other and s.yaw then
-            local axis = util.transform.rotateZ(s.yaw) * util.vector3(1, 0, 0)
+        -- level pieces (walkways, bridges) join each other, walls join walls
+        if other and s.yaw and (other.level or false) == (mine.level or false) and s.host == snap.insideHost then
+            local along = function(seg) return seg.alongY and util.vector3(0, 1, 0) or util.vector3(1, 0, 0) end
+            local axis = util.transform.rotateZ(s.yaw) * along(other)
             local middle = s.pos + axis * (other.at or 0)
             local yaw = s.yaw + placing.curve
-            local newAxis = util.transform.rotateZ(yaw) * util.vector3(1, 0, 0)
+            local newAxis = util.transform.rotateZ(yaw) * along(mine)
             for _, side in ipairs({ -1, 1 }) do
                 local joint = middle + axis * (side * other.half)
                 local p = joint + newAxis * (side * mine.half - (mine.at or 0))
                 local dd = dist2d(p, hit)
-                if dd < SNAP_RANGE and (not bestD or dd < bestD) then best, bestD, bestYaw = p, dd, yaw end
+                if dd < SNAP_RANGE and (not bestD or dd < bestD) then best, bestD, bestYaw, bestZ = p, dd, yaw, s.pos.z end
             end
         end
     end
     if not best then return hit end
     placing.snapped = true
     placing.yaw = bestYaw
+    if mine.level then return util.vector3(best.x, best.y, bestZ) end
     return util.vector3(best.x, best.y, groundHeight(best.x, best.y) or hit.z)
 end
 
@@ -613,9 +654,23 @@ local function updatePlacing(dt)
     if input.isKeyPressed(input.KEY.DownArrow) then placing.raise = math.max(-cfg.limit, placing.raise - cfg.speed * dt) end
 
     local d = defs.look(placing.kind, placing.variant)
-    local hit = snap.insideHost and aimAtFloor() or (not snap.insideHost and aimAtGround()) or nil
+    local hit, normal
+    if d.mount then
+        hit, normal = aimAtSurface(d.mount)
+    else
+        hit = snap.insideHost and aimAtFloor() or (not snap.insideHost and aimAtGround()) or nil
+    end
     local extra
     placing.snapped = false
+    if hit and d.mount == 'wall' then
+        -- flat against the wall, facing out
+        placing.yaw = math.atan2(normal.x, normal.y) + (d.wallTurn or 0)
+        hit = hit + util.vector3(normal.x, normal.y, 0) * (d.depth or 4)
+    elseif hit and d.anchor == 'end' and d.segment then
+        -- it starts where you aim and runs away from you
+        local axis = util.transform.rotateZ(placing.yaw) * (d.segment.alongY and util.vector3(0, 1, 0) or util.vector3(1, 0, 0))
+        hit = hit + axis * d.segment.half
+    end
     if hit and d.segment then hit = snapSegment(d, hit) end
     if hit then
         placing.valid, placing.reason = validate(hit, dt)
@@ -639,7 +694,7 @@ local function updatePlacing(dt)
         end
     end
     local variants = not placing.moving and defs.buildings[placing.kind].variants
-    local title = 'Placing: ' .. d.name .. '   (' .. costText(d.cost) .. ')'
+    local title = 'Placing: ' .. (d.label or d.name) .. '   (' .. costText(d.cost, d.price) .. ')'
     if placing.moving and placing.pos then
         local f = placing.from
         local a = placing.analysis
@@ -987,6 +1042,9 @@ return {
             elseif e.kind then
                 startPlacing(e.kind)
                 placing.forcedAim = e.at
+                placing.forcedNormal = e.normal
+                if e.yaw then placing.yaw = e.yaw end
+                if e.variant then placing.variant = e.variant; send('TMW_BeginPlace', { kind = e.kind, variant = e.variant }) end
                 if e.curve then placing.curve = e.curve end
                 if e.raise then placing.raise = e.raise end
             elseif e.cycle then
