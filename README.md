@@ -9,9 +9,43 @@ You found the colony wherever you're standing.
 
 ## Install
 
-1. In the OpenMW launcher, open **Data Files → Directories** and add this
-   folder (`tomorrowind/`).
-2. Enable `Tomorrowind.omwaddon` and `Tomorrowind.omwscripts` in the content list.
+You need your own copy of **Morrowind** and **[OpenMW](https://openmw.org) 0.52
+or later**, with OpenMW already set up to run Morrowind.
+
+1. **Download** `tomorrowind-vX.Y.Z.zip` from the
+   [latest release](https://github.com/studioroor/tomorrowind/releases/latest)
+   (under **Assets**, below the release notes). Not the "Source code" zips:
+   those are the development files.
+2. **Unzip** it somewhere it can stay, for example next to your other mods.
+   You get a folder called `tomorrowind` with `Tomorrowind.omwaddon`,
+   `Tomorrowind.omwscripts`, `scripts/` and `meshes/` inside. Keep those
+   together. OpenMW loads the mod from this folder, so don't delete it or
+   move it afterwards.
+3. **Add the folder** in the OpenMW launcher: open **Data Files**, go to the
+   **Data Directories** tab, add a directory and pick that `tomorrowind`
+   folder (the one with the two `Tomorrowind.*` files directly in it, not a
+   folder above it).
+4. **Enable the mod** on the **Content Files** tab: tick both
+   `Tomorrowind.omwaddon` and `Tomorrowind.omwscripts`. Leave them below
+   `Morrowind.esm` (and Tribunal and Bloodmoon, if you have them).
+5. **Play:** start the game, load a save or begin a new one, stand somewhere
+   outdoors and press **K** to found your colony.
+
+Without the launcher, add these lines to your `openmw.cfg` instead (with your
+own path):
+
+```
+data="/path/to/tomorrowind"
+content=Tomorrowind.omwaddon
+content=Tomorrowind.omwscripts
+```
+
+**Updating:** quit the game, replace the `tomorrowind` folder with the new
+one, and keep both content files ticked. Back up a save you care about first:
+older saves aren't tested against newer versions.
+
+**From source:** a clone of this repository works as the `tomorrowind` folder
+too (it also holds the tests and tools, which the game ignores).
 
 Tools, buildings and settlers are created as records at runtime (OpenMW 0.52
 Lua), and every settler is a unique Dunmer with their own name and face. The
