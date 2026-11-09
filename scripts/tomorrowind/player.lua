@@ -401,7 +401,7 @@ startPlacing = function(kind)
     send('TMW_BeginPlace', { kind = kind, variant = 1 })
 end
 
--- Moving a building: place it again, as it is.
+-- Moving a building or a furnishing: place it again, as it is.
 startMoving = function(site)
     startPlacing(site.kind)
     placing.moving, placing.from, placing.variant = site.id, site, site.variant or 1
@@ -695,7 +695,9 @@ local function updatePlacing(dt)
     end
     local variants = not placing.moving and defs.buildings[placing.kind].variants
     local title = 'Placing: ' .. (d.label or d.name) .. '   (' .. costText(d.cost, d.price) .. ')'
-    if placing.moving and placing.pos then
+    if placing.moving and placing.pos and d.small then
+        title = string.format('Moving: %s   (free)', d.label or d.name)
+    elseif placing.moving and placing.pos then
         local f = placing.from
         local a = placing.analysis
         local cost, work = C.moveCost(placing.kind, { x = f.pos.x, y = f.pos.y, yaw = f.yaw },

@@ -1205,7 +1205,7 @@ local function snapshot()
             progress = C.siteProgress(c, sid),
             pos = v3(s.pos), radius = siteRadius(sid),
             obj = objs.sites[sid], yaw = s.yaw, small = defs.buildings[s.kind].small, variant = s.variant, host = s.host,
-            canMove = C.canMove(c, sid) or false,
+            canMove = C.canMove(c, sid) or C.canRelocate(c, sid),
         }
     end
     for _, opt in ipairs(C.assignmentOptions(c)) do
@@ -1629,10 +1629,16 @@ local function placeConfirm(e)
     local variant = ghost.variant
     local moving = ghost.moving
     local look = defs.look(kind, variant)
-    if look.price and C.gold(c) < look.price then
+    if not moving and look.price and C.gold(c) < look.price then
         return message(string.format('That costs %d gold; the treasury has %d.', look.price, math.floor(C.gold(c))))
     end
     removeGhost()
+    if moving and C.canRelocate(c, moving) then
+        -- a furnishing just goes where it's put
+        C.relocate(c, moving, plain(e.pos), e.yaw or 0, e.radius)
+        processEvents()
+        return pushState()
+    end
     if moving then
         if C.startMove(c, moving, plain(e.pos), e.yaw or 0, e.foundation, true, e.radius) then
             processEvents()

@@ -1862,6 +1862,22 @@ function C.canMove(c, sid)
     return s and s.built and not s.moving and not s.host and not def(s).small and not def(s).salvage and not def(s).moves
 end
 
+-- Furnishings (lamps, rugs, stairs, bridges...) are rearranged at once and
+-- for nothing, as their materials would come straight back anyway.
+function C.canRelocate(c, sid)
+    local s = c.sites[sid]
+    return s and s.built and def(s).small and not def(s).salvage and not def(s).moves or false
+end
+
+function C.relocate(c, sid, pos, yaw, radius)
+    if not C.canRelocate(c, sid) then return false end
+    local s = c.sites[sid]
+    s.pos = { x = pos.x, y = pos.y, z = pos.z }
+    s.yaw, s.leveled, s.radius = yaw, true, radius or s.radius
+    emit(c, { kind = 'moved', site = sid })
+    return true
+end
+
 -- Start moving a building: its move is a construction site at the new spot.
 -- foundation: { wood, work, depth } as for placing; leveled: the floor height
 -- given is final (sloped ground).

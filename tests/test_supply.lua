@@ -336,3 +336,29 @@ test('moves are named after what they move', function()
     local t = C.nextTask(c, w[1])
     assert(t.steps[3].label:find(defs.buildings.mine.name), t.steps[3].label)
 end)
+
+test('furnishings are moved at once and for nothing', function()
+    local c = colony(0)
+    local bridge = C.addSite(c, 'ropebridge', P(600, 0), 0, true)
+    local candle = C.addSite(c, 'candle', P(700, 0), 0, true)
+    candle.price = 8
+    local gold, wood = C.gold(c), c.stock.wood
+    eq(C.canMove(c, bridge.id), false, 'no scaffolds for a bridge')
+    eq(C.canRelocate(c, bridge.id), true)
+    C.drainEvents(c)
+    eq(C.relocate(c, bridge.id, P(900, 50), 1.2), true)
+    eq(bridge.pos.x, 900)
+    eq(bridge.yaw, 1.2)
+    eq(C.relocate(c, candle.id, P(950, 0), 0), true)
+    eq(C.gold(c), gold, 'moving something bought costs nothing')
+    eq(c.stock.wood, wood)
+    eq(#c.siteOrder, 3, 'no move site, no salvage') -- the storehouse, the bridge, the candle
+    local moved = 0
+    for _, e in ipairs(C.drainEvents(c)) do if e.kind == 'moved' then moved = moved + 1 end end
+    eq(moved, 2)
+    -- buildings still go through a move, unfinished furnishings don't move
+    local mine = C.addSite(c, 'mine', P(-600, 0), 0, true)
+    eq(C.canRelocate(c, mine.id), false)
+    local lamp = C.addSite(c, 'lamppost', P(-900, 0), 0, false)
+    eq(C.canRelocate(c, lamp.id), false)
+end)

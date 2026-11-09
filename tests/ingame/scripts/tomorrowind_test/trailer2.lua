@@ -15,12 +15,12 @@ local PREVIEW = false -- true: one frame per second of each shot, to check the f
 local ONLY = nil -- e.g. { home = true }: film just these (the others still set up)
 local v3 = util.vector3
 local FPS = 30
-local VILLAGE = v3(-2504, -55848, 1300) -- the meadow: see the scout scene's map
 local snap
 local frame = 0
 local function log(...) print('[TRAILER]', ...) end
 local function dbg(e) core.sendGlobalEvent('TMW_Debug', e) end
 
+local VILLAGE = require('scripts.tomorrowind_test.trailer2_set').VILLAGE
 local function at(dx, dy) return v3(VILLAGE.x + dx, VILLAGE.y + dy, 0) end
 local function land(dx, dy, lift)
     local p = at(dx, dy)
@@ -91,7 +91,7 @@ local function aroundClear(getTarget, r0, r1, h, a0, turn)
     return function(u)
         local tg = getTarget()
         if not tg then return nil end
-        base = base or clearAngle(tg, (r0 + r1) / 2, h, a0)
+        base = base or clearAngle(tg, (r0 + r1) / 2, h, type(a0) == 'function' and a0() or a0)
         local e = ease(u * 0.5 + 0.25) * 2 - 0.5
         local a, r = base + turn * e, lerp(r0, r1, e)
         local cam = tg + v3(math.sin(a) * r, math.cos(a) * r, 0)
@@ -150,26 +150,8 @@ end
 ---------------------------------------------------------------------------
 -- the village: all there from the start, this trailer is about what's new
 
--- kind, dx, dy, variant, yaw
--- (laid out on open ground: see the probe_map scene)
-local VILLAGE_SITES = {
-    { 'house', 400, -1000, 3, 0 }, -- the one that moves: first, so `move` picks it
-    { 'lumber', -1200, -1400 }, { 'mine', 1200, -1400 }, { 'smelter', 800, -200 },
-    { 'house', -1000, 900, 2, 3.14 }, { 'house', 500, 900, 5, 3.14 }, { 'house', -1700, -100, 4, 1.57 },
-    { 'guardpost', 200, -600 },
-    { 'campfire', -750, -50 }, { 'bookshelf', -500, 200 }, { 'table', -1000, 100 },
-    { 'market', 300, 350, nil, -0.75 }, -- caravans come in from the east, over open ground
-    -- a field of each crop, in the clear ground to the north-west
-    { 'farm', -2300, 1150, 2 }, { 'farm', -2950, 1150, 4 }, { 'farm', -2300, 550, 3 }, { 'farm', -2950, 550, 1 },
-    -- (the bridge's two houses come with its shot)
-    { 'bench', -900, -220 }, { 'chair', -620, -250 }, { 'chest', -350, 170 }, { 'lamppost', -500, -180 },
-    { 'lantern', -1050, -120 }, { 'lantern', -1000, 280 }, { 'lantern', -200, -500 },
-}
--- far enough apart that the shortest bridge just spans the gap, resting a
--- little way onto each roof (a house is 558 deep, the bridge 1036 long)
-local H1, H2 = { 2850, 2537 }, { 2850, 1063 }
-local HOME = { -1700, -100 } -- the house we go into: a Hlaalu house with a big room
-local MOVE_TO = { -250, -1450, 0.9 }
+local SET = require('scripts.tomorrowind_test.trailer2_set')
+local HOME, MOVE_TO = SET.HOME, SET.MOVE_TO
 
 local function assignJobs()
     local ws = snap.workers
@@ -224,25 +206,29 @@ local function panRoom()
     end
 end
 
-local bridgeFrom
-
--- rising up the stairs to the roof
+-- rising up the stairs to the roof (the offsets are for stairs turned a
+-- quarter round, climbing east; they turn with the stairs)
 local function stairsCam()
     return function(u)
-        local base = land(H1[1] - 700, H1[2])
+        local st = site('stairs')
+        if not st then return nil end
+        local base = v3(st.pos.x, st.pos.y, st.pos.z)
+        local turn = util.transform.rotateZ((st.yaw or 0) - math.pi / 2)
         local e = ease(u)
-        local cam = base + v3(lerp(-650, -250, e), lerp(-520, -380, e), lerp(140, 640, e))
+        local cam = base + turn * v3(lerp(-650, -250, e), lerp(-520, -380, e), lerp(140, 640, e))
         cam = v3(cam.x, cam.y, math.max(cam.z, core.land.getHeightAt(cam, self.cell) + 130))
-        return cam, base + v3(lerp(0, 450, e), 0, lerp(150, 520, e))
+        return cam, base + turn * v3(lerp(0, 450, e), 0, lerp(150, 520, e))
     end
 end
+
+local function setCtx() return { dbg = dbg, land = land, roofAt = roofAt, log = log } end
 
 ---------------------------------------------------------------------------
 local SHOTS = {
     -- the village in the morning: the title
     { name = 'open', hour = 9.1, prepare = 12, dur = 7, speed = 1,
       setup = function()
-          for _, it in ipairs(VILLAGE_SITES) do
+          for _, it in ipairs(SET.village) do
               dbg({ cmd = 'build', kind = it[1], pos = land(it[2], it[3]), variant = it[4], yaw = it[5], built = true })
           end
           dbg({ cmd = 'spawn', n = 12 })
@@ -264,24 +250,18 @@ local SHOTS = {
       end },
     -- the stairs up a house, and the rope bridge across to the next roof
     { name = 'stairs', prepare = 5, dur = 5, speed = 1,
-      setup = function()
-          -- two houses side by side, their floors level for the bridge
-          local z = math.min(land(H1[1], H1[2]).z, land(H2[1], H2[2]).z) + 40
-          for _, h in ipairs({ H1, H2 }) do
-              local g = land(h[1], h[2])
-              dbg({ cmd = 'build', kind = 'house', variant = 4, pos = v3(g.x, g.y, z), built = true, leveled = true })
-          end
-          dbg({ cmd = 'build', kind = 'stairs', variant = 4, pos = land(H1[1] - 700, H1[2]), yaw = math.pi / 2, built = true, leveled = true })
-      end,
+      setup = function() SET.buildSet(1, setCtx()) end,
       cam = stairsCam() },
     { name = 'bridge', prepare = 3, dur = 6, speed = 1,
-      setup = function()
-          local roof = roofAt(land(H1[1] + 250, H1[2] - 219))
-          bridgeFrom = roof
-          log('bridge from', roof, 'to roof', roofAt(land(H2[1] + 250, H2[2] + 219)), 'ends at y', roof.y - 1036)
-          dbg({ cmd = 'build', kind = 'ropebridge', pos = roof + v3(0, -518, 0), yaw = math.pi / 2, built = true, leveled = true })
-      end,
-      cam = aroundClear(function() return bridgeFrom and bridgeFrom + v3(0, -500, -40) end, 1150, 1000, 300, math.pi / 2 + 0.35, -0.5) },
+      setup = function() SET.buildSet(2, setCtx()) end,
+      -- from the side of the bridge, whichever way it runs
+      cam = aroundClear(function()
+          local b = site('ropebridge')
+          return b and v3(b.pos.x, b.pos.y, b.pos.z - 40)
+      end, 1150, 1000, 300, function()
+          local b = site('ropebridge')
+          return (b and b.yaw or 0) + 0.35
+      end, -0.5) },
     -- a house moves to a new spot
     -- (the clock slowed down, or the builders would have it done in a moment)
     { name = 'move', prepare = 3, dur = 9, speed = 1, slow = true,

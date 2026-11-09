@@ -26,7 +26,7 @@ Lua), and every settler is a unique Dunmer with their own name and face. The
 | Activate a building | Open the overview with that building |
 | Look at a settler | See what they're doing; **K** opens their row in the ledger |
 | **Delete** | Remove the furnishing you're looking at |
-| **M** | Move the building you're looking at |
+| **M** | Move the building or furnishing you're looking at |
 | **Z / X** | Rotate while placing; a wall or fence that has snapped on bends around the joint |
 | **Left / Right** | Next or previous model while placing (houses, tents, chairs, chests...) |
 | **Up / Down** | Raise or lower while placing |
@@ -61,6 +61,8 @@ part of the day, so layout matters. `tests/test_economy.lua` checks this balance
   every unit it travels and every degree it turns. A scaffold goes up at the new
   spot, and the building slides over as the work is done. It keeps working
   while it moves; cancelling the move leaves what was delivered as salvage.
+  Furnishings (lamps, rugs, stairs, bridges and the like) move the same way but
+  at once and for free.
 - **Demolishing** a building leaves half of what it cost in a pile on the spot,
   and cancelling one leaves what was delivered. Laborers and builders carry it
   back when there's no construction to do. Furnishings give everything back at
@@ -286,7 +288,8 @@ with scripted cameras (the engine saves every frame, no screen recording), and
 MysticCards (OpenMW's Morrowind-style font) and sound (needs ffmpeg, Pillow and
 numpy; `--music file` replaces the generated music). The 0.2 trailer, about
 what's new in that version, is `tools/film_trailer.sh .playtest/take2 trailer2`
-and `tools/make_trailer.py .playtest/take2 trailer/ --cut 0.2`.
+and `tools/make_trailer.py .playtest/take2 trailer/ --cut 0.2`; its bridge set
+can be arranged by hand first with `tools/stage_trailer.sh`.
 
 `tools/make_interiors.py` generates `Tomorrowind.omwaddon` and `interiors.lua` from
 your `Morrowind.esm` (ids and positions only, no game assets).
