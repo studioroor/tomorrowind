@@ -7,9 +7,10 @@
 # The village and the bridge set (two houses, stairs, a rope bridge) are built
 # and you're left standing beside them. Look at something and press M to move
 # it (houses, the bridge and the stairs alike; Z/X turns it, Up/Down raises or
-# lowers it, Enter puts it down), Delete removes it, and the Furnish menu
-# places new ones. Building finishes at once and materials and gold stay
-# topped up. Quit the game when it looks right: the bridge set is written to
+# lowers it, Shift makes both finer, Enter puts it down), Delete removes it,
+# and the Furnish menu places new ones. No placement rules apply (overlaps,
+# slopes and the like are all allowed), building finishes at once, and
+# materials and gold stay topped up. Quit the game when it looks right: the bridge set is written to
 # tests/ingame/scripts/tomorrowind_test/trailer2_layout.lua, which the trailer
 # (tools/film_trailer.sh <out> trailer2) then builds instead of its default.
 #

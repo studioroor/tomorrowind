@@ -68,5 +68,27 @@ return { engineHandlers = { onUpdate = function(dt)
         view(p + v3(0, -800, 150), p)
     end)
     once('s4', 25.5, function() debug.takeScreenshot() end)
-    once('quit', 27, function() core.quit() end)
+    -- a bridge resting on a house doesn't stop the house moving
+    once('restbridge', 27, function()
+        local h = site('house')
+        dbg({ cmd = 'build', kind = 'ropebridge', pos = v3(h.pos.x + 300, h.pos.y, h.pos.z + 330), yaw = 0, built = true, leveled = true })
+    end)
+    place('mvhouse', 29, function() local h = site('house'); return { move = 'house', at = v3(h.pos.x + 60, h.pos.y + 40, h.pos.z), yaw = 0.1 } end)
+    once('mvhouselog', 31, function()
+        local m = site('move')
+        log('house move under the bridge:', m and m.status or 'no move site (refused)')
+        dbg({ cmd = 'finish' })
+    end)
+    -- free placement (staging): a house right on top of another one
+    once('free', 32, function() self:sendEvent('TMW_DebugFree', true) end)
+    place('overlap', 33, function()
+        local h = site('house')
+        return { kind = 'house', variant = 2, at = v3(h.pos.x + 100, h.pos.y, h.pos.z), yaw = 0, raise = 900 }
+    end)
+    once('overlaplog', 35, function()
+        local n, zs = 0, {}
+        for _, s_ in ipairs(snap.sites) do if s_.kind == 'house' then n = n + 1; zs[#zs + 1] = string.format('%.0f', s_.pos.z) end end
+        log('houses after free placement:', n, 'floors at', table.concat(zs, ' '))
+    end)
+    once('quit', 36, function() core.quit() end)
 end }, eventHandlers = { TMW_State = function(s) snap = s end } }

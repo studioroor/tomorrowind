@@ -519,8 +519,11 @@ local function obstruction(pos, r, top, bottom)
         if o then
             for _, s in ipairs(snap.sites or {}) do
                 -- a tent you're placing inside, or a wall you're joining onto
-                if s.obj and s.obj.id == o.id and (defs.buildings[s.kind].hollow
-                    or (placing.snapped and defs.look(s.kind, s.variant).segment)) then
+                local other = defs.buildings[s.kind]
+                if s.obj and s.obj.id == o.id and (other.hollow
+                    or (placing.snapped and defs.look(s.kind, s.variant).segment)
+                    -- stairs, walkways and bridges lean on buildings and rest on roofs
+                    or (other.group == 'Structures' and other.mount)) then
                     hollow = true
                 end
             end
@@ -555,10 +558,16 @@ local function tooClose(d, pos, r, s)
     return dist2d(pos, s.pos) < (s.radius + r) * 0.75
 end
 
+local freePlacement = false -- staging (tests): no rules at all, it goes where it's put
+
 local function validate(pos, dt)
     local d = defs.look(placing.kind, placing.variant)
     local r, height = ghostSize()
     placing.radius = r
+    if freePlacement then
+        placing.analysis = { ok = true, level = pos.z + placing.raise, low = pos.z, high = pos.z, depth = 0, wood = 0, work = 0 }
+        return true
+    end
     local a
     if snap.insideHost or d.mount then
         -- on whatever surface was aimed at: it stands where it's put
@@ -645,13 +654,16 @@ end
 
 local function updatePlacing(dt)
     -- when snapped, rotating bends the new piece around the joint
+    -- Shift: slower, for fine adjustments
+    local fine = input.isShiftPressed() and 0.2 or 1
     local turn = 0
-    if input.isKeyPressed(input.KEY.Z) then turn = turn - ROTATE_SPEED * dt end
-    if input.isKeyPressed(input.KEY.X) then turn = turn + ROTATE_SPEED * dt end
+    if input.isKeyPressed(input.KEY.Z) then turn = turn - ROTATE_SPEED * fine * dt end
+    if input.isKeyPressed(input.KEY.X) then turn = turn + ROTATE_SPEED * fine * dt end
     if placing.snapped then placing.curve = placing.curve + turn else placing.yaw = placing.yaw + turn end
     local cfg = defs.placeRaise
-    if input.isKeyPressed(input.KEY.UpArrow) then placing.raise = math.min(cfg.limit, placing.raise + cfg.speed * dt) end
-    if input.isKeyPressed(input.KEY.DownArrow) then placing.raise = math.max(-cfg.limit, placing.raise - cfg.speed * dt) end
+    local limit = freePlacement and 5000 or cfg.limit
+    if input.isKeyPressed(input.KEY.UpArrow) then placing.raise = math.min(limit, placing.raise + cfg.speed * fine * dt) end
+    if input.isKeyPressed(input.KEY.DownArrow) then placing.raise = math.max(-limit, placing.raise - cfg.speed * fine * dt) end
 
     local d = defs.look(placing.kind, placing.variant)
     local hit, normal
@@ -706,10 +718,13 @@ local function updatePlacing(dt)
     end
     local lines = {
         text(title, nil, true),
-        text((placing.snapped and 'Z / X bend' or 'Z / X rotate') .. '     Up / Down height     Enter place     Backspace cancel'),
+        text((placing.snapped and 'Z / X bend' or 'Z / X rotate') .. '     Up / Down height     Shift: finer     Enter place     Backspace cancel'),
     }
     if variants then
         lines[#lines + 1] = text(string.format('Left / Right model: %s (%d of %d)', d.label or d.name, placing.variant, #variants))
+    end
+    if freePlacement then
+        lines[#lines + 1] = text('Free placement: no rules, it goes where you put it')
     end
     if placing.snapped then
         lines[#lines + 1] = text(string.format('Joined up, bent by %d degrees', math.floor(math.deg(placing.curve) + 0.5)))
@@ -1032,6 +1047,7 @@ return {
         end,
         -- debug hooks (used by the scripted playtest)
         TMW_DebugQuiet = function(on) quietUi = on end,
+        TMW_DebugFree = function(on) freePlacement = on end,
         TMW_DebugLedger = function(e)
             if e.open then openLedger(e.tab) else closeLedger() end
         end,

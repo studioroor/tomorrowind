@@ -64,6 +64,8 @@ return {
             once('found', 4, function()
                 core.sendGlobalEvent('TMW_Found', { yaw = 0, pos = land(0, 0, 0) })
                 -- (not 'quiet': that turns off the hover labels M needs)
+                -- no placement rules: things go exactly where they're put
+                self:sendEvent('TMW_DebugFree', true)
             end)
             once('village', 6, function()
                 for _, it in ipairs(SET.village) do
@@ -77,7 +79,8 @@ return {
                 local c = SET.setCentre
                 dbg({ cmd = 'tp', pos = land(c[1] + 650, c[2], 60), lookAt = land(c[1], c[2], 300) })
                 ui.showMessage('Staging the bridge set. Look at a house, the bridge or the stairs and press M to move it '
-                    .. '(Z/X turn, Up/Down height, Enter to put it down). Building finishes at once. Quit when it looks right.')
+                    .. '(Z/X turn, Up/Down height, Shift for finer steps, Enter to put it down). No placement rules apply, '
+                    .. 'and building finishes at once. Quit when it looks right.')
                 log(SET.layout and 'started from trailer2_layout.lua' or 'started from the default layout')
             end)
             if not done.look or not snap or not snap.founded then return end

@@ -30,6 +30,7 @@ Lua), and every settler is a unique Dunmer with their own name and face. The
 | **Z / X** | Rotate while placing; a wall or fence that has snapped on bends around the joint |
 | **Left / Right** | Next or previous model while placing (houses, tents, chairs, chests...) |
 | **Up / Down** | Raise or lower while placing |
+| **Shift** | Hold for finer turning and raising |
 | **Enter** | Place the building |
 | **Backspace** | Cancel placement |
 
