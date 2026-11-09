@@ -904,7 +904,8 @@ local function hoverLines(id, dist)
             local lines = { s.name, s.status }
             if s.small then
                 hoverSite = s.id
-                lines[#lines + 1] = s.built and 'Delete: remove' or 'Delete: cancel'
+                if s.canMove then hoverMove = s end
+                lines[#lines + 1] = (s.canMove and 'M: move     ' or '') .. (s.built and 'Delete: remove' or 'Delete: cancel')
             elseif s.canMove then
                 hoverMove = s
                 lines[#lines + 1] = 'M: move'
