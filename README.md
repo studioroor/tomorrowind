@@ -1,4 +1,4 @@
-# Tomorrowind
+<p align="center"><img src="art/tomorrowind-banner.png" alt="Tomorrowind: a House Hlaalu colony builder for OpenMW" width="100%"></p>
 
 An OpenMW (**0.52+**) mod about founding and running a House Hlaalu colony:
 assign settlers to jobs, mine, farm, smelt, haul and build, and place

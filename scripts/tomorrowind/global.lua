@@ -41,6 +41,8 @@ local debugOn = defs.debug
 local siteByObj = {}         -- object id -> sid
 local doorByObj = {}         -- object id -> { sid=, exit= }
 local ROOM_TOKEN = -1        -- steps in a room aren't the planner's
+local FILM_TOKEN = -2        -- nor are walks scripted for filming (debug 'march')
+local filmed = {}            -- settlers taken out of the colony's hands for a shot
 local roomTimer, roomDirty = 0, false
 local roomOutQueue = {}      -- wid -> where they go when they leave a room
 local roomLeftAt = {}        -- wid -> sim time they were sent out (the move shows next frame)
@@ -1333,6 +1335,7 @@ local function updateWorkers(dt)
         local o = objs.workers[wid]
         local isActive = o and o:isValid() and active[o.id]
         anyActive = anyActive or isActive
+        if filmed[wid] then goto nextWorker end
         if objs.inRoom[wid] then
             -- in the room with the player: the work still counts
             local e = objs.inRoom[wid]
@@ -1819,6 +1822,69 @@ local function debugCommand(e)
                 processEvents()
                 break
             end
+        end
+    elseif e.cmd == 'march' and c then
+        -- filming: settlers walk from one point to another and nothing else,
+        -- left alone by the colony until 'release'. paths: { { from, to }, ... }
+        for i, path in ipairs(e.paths or {}) do
+            local wid = c.workerOrder[i]
+            local o = wid and objs.workers[wid]
+            if o and o:isValid() then
+                C.cancelTask(c, wid)
+                tokens[wid] = nil
+                filmed[wid] = true
+                pcall(o.teleport, o, '', path.from, { onGround = true,
+                    rotation = util.transform.rotateZ(math.atan2(path.to.x - path.from.x, path.to.y - path.from.y)) })
+                o:sendEvent('TMW_Step', { op = 'goto', center = path.to, standoff = 10, token = FILM_TOKEN, label = 'Walking' })
+            end
+        end
+    elseif e.cmd == 'release' and c then
+        filmed = {}
+    elseif e.cmd == 'hide' then
+        -- filming: clear the view. Scenery in a wedge in front of a camera is
+        -- switched off: everything nearer than e.near, and further out (up to
+        -- e.far) only what's named by e.prefixes (a town's buildings, say).
+        -- The game's own scenery only: the colony's buildings aren't statics,
+        -- and their generated record ids match no prefix.
+        local from, n = e.from, 0
+        local cx, cy = math.floor(from.x / 8192), math.floor(from.y / 8192)
+        local reach = math.ceil((e.far or 6000) / 8192)
+        for gx = cx - reach, cx + reach do
+            for gy = cy - reach, cy + reach do
+                local ok, cell = pcall(world.getExteriorCell, gx, gy)
+                local found = {}
+                for _, kind in ipairs({ types.Static, types.Light, types.Activator, types.Door }) do
+                    for _, o in ipairs(ok and cell and cell:getAll(kind) or {}) do found[#found + 1] = o end
+                end
+                for _, o in ipairs(found) do
+                    local dx, dy = o.position.x - from.x, o.position.y - from.y
+                    local dist = math.sqrt(dx * dx + dy * dy)
+                    local off = math.atan2(math.sin(math.atan2(dx, dy) - e.yaw), math.cos(math.atan2(dx, dy) - e.yaw))
+                    if o.enabled and dist < (e.far or 6000) and math.abs(off) < (e.half or 0.9) then
+                        -- near by, all the game's scenery (the colony's own aren't statics)
+                        local hide = dist < (e.near or 1500) and o.type == types.Static
+                        local id = o.recordId:lower()
+                        for _, prefix in ipairs(e.prefixes or {}) do
+                            if id:sub(1, #prefix) == prefix then hide = true end
+                        end
+                        if hide then
+                            o.enabled = false
+                            n = n + 1
+                        elseif e.report then
+                            local key = id:match('^[^_]*_[^_]*') or id
+                            e.seen = e.seen or {}
+                            e.seen[key] = (e.seen[key] or 0) + 1
+                        end
+                    end
+                end
+            end
+        end
+        log('hid', n, 'pieces of scenery')
+        if e.seen then
+            local parts = {}
+            for k, v in pairs(e.seen) do parts[#parts + 1] = k .. '=' .. v end
+            table.sort(parts)
+            log('left standing further out:', table.concat(parts, ' '))
         end
     elseif e.cmd == 'talk' and c then
         local o = objs.workers[c.workerOrder[1]]
