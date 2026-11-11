@@ -431,7 +431,7 @@ local function stopPlacing(confirm)
         local a = placing.analysis
         send('TMW_PlaceConfirm', {
             moving = placing.moving,
-            pos = placing.pos, yaw = placing.yaw, radius = placing.radius,
+            pos = placing.pos, yaw = placing.yaw, radius = placing.radius, half = placing.half,
             foundation = { wood = a.wood, work = a.work, depth = a.depth },
         })
     else
@@ -453,6 +453,27 @@ local function ghostSize()
         end
     end
     return d.footprint, nil
+end
+
+-- The building's own half width and depth (and where its middle is, in its
+-- own frame), worked out from the preview's world-aligned box and its turn.
+-- Near 45 degrees that can't be told apart, so the last good one is kept.
+local footprints = {}
+local function measureFootprint()
+    if not (placing.obj and placing.obj:isValid()) then return end
+    local key = placing.kind .. '/' .. tostring(placing.variant)
+    local ok, box = pcall(placing.obj.getBoundingBox, placing.obj)
+    if ok and box and box.halfSize.x > 1 and box.halfSize.x < 5000 then
+        local yaw = placing.obj.rotation and placing.obj.rotation:getYaw() or placing.yaw or 0
+        local cs, sn = math.abs(math.cos(yaw)), math.abs(math.sin(yaw))
+        local det = cs * cs - sn * sn
+        if math.abs(det) > 0.3 then
+            local X, Y = box.halfSize.x, box.halfSize.y
+            local mid = util.transform.rotateZ(-yaw) * (box.center - placing.obj.position)
+            footprints[key] = { x = (X * cs - Y * sn) / det, y = (Y * cs - X * sn) / det, cx = mid.x, cy = mid.y }
+        end
+    end
+    return footprints[key]
 end
 
 local function dist2d(a, b)
@@ -564,6 +585,7 @@ local function validate(pos, dt)
     local d = defs.look(placing.kind, placing.variant)
     local r, height = ghostSize()
     placing.radius = r
+    placing.half = measureFootprint()
     if freePlacement then
         placing.analysis = { ok = true, level = pos.z + placing.raise, low = pos.z, high = pos.z, depth = 0, wood = 0, work = 0 }
         return true
@@ -1038,6 +1060,9 @@ return {
             openLedger('overview')
         end,
         TMW_OpenLedger = function(e) openLedger(e and e.tab or 'overview') end,
+        -- the rest window with a bed as its target allows sleeping, as a
+        -- vanilla bed's script does
+        TMW_Rest = function(e) I.UI.addMode('Rest', { target = e.bed }) end,
         TMW_Face = function(e) camera.setYaw(e.yaw) end,
         TMW_Bubble = function(e)
             for i = #bubbles, 1, -1 do

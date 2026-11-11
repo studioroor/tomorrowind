@@ -234,25 +234,66 @@ local function pilingSpots(sid)
     local s = c.sites[sid]
     local spots = {}
     if not s.leveled or defs.buildings[s.kind].small then return spots end
-    local r = footprintRadius(sid) * 0.85
-    local count = math.max(8, math.floor(2 * math.pi * r / 160))
-    for i = 0, count - 1 do
-        local a = i * 2 * math.pi / count
-        local p = v3(s.pos) + util.vector3(math.sin(a) * r, math.cos(a) * r, 0)
+    local function add(p, a)
         local ground = landHeight(p)
         if ground and s.pos.z - ground > defs.slope.hiddenDepth then
             spots[#spots + 1] = { x = p.x, y = p.y, a = a }
         end
     end
+    local h = s.half
+    if h then
+        -- along the walls, just inside them, so the building hides the tops
+        -- (the box includes the roof's overhang: the walls are further in)
+        local rot = util.transform.rotateZ(s.yaw)
+        local hx, hy = h.x * 0.72, h.y * 0.72
+        local corners = { { -hx, -hy }, { hx, -hy }, { hx, hy }, { -hx, hy } }
+        for k = 1, 4 do
+            local a, b = corners[k], corners[k % 4 + 1]
+            local len = math.sqrt((b[1] - a[1]) ^ 2 + (b[2] - a[2]) ^ 2)
+            local n = math.max(1, math.floor(len / 170 + 0.5))
+            for i = 0, n - 1 do
+                local f = i / n
+                local loc = util.vector3(h.cx + a[1] + (b[1] - a[1]) * f, h.cy + a[2] + (b[2] - a[2]) * f, 0)
+                add(v3(s.pos) + rot * loc, s.yaw + k * math.pi / 2 + i)
+            end
+        end
+        return spots
+    end
+    -- older saves: a ring inside the footprint radius
+    local r = footprintRadius(sid) * 0.85
+    local count = math.max(8, math.floor(2 * math.pi * r / 160))
+    for i = 0, count - 1 do
+        local a = i * 2 * math.pi / count
+        add(v3(s.pos) + util.vector3(math.sin(a) * r, math.cos(a) * r, 0), a)
+    end
     return spots
 end
 
-local function spawnPiling(sid, spot)
+-- Where a piling stands when it has been driven `k` (0..1) of the way in:
+-- it goes in sticking up well above the floor and ends a little below it,
+-- where the building hides its top. The mesh is centred on its origin.
+local function pilingPos(sid, spot, k)
+    local sl = defs.slope
+    local top = c.sites[sid].pos.z - sl.pilingSink + (1 - k) * sl.pilingDrive
+    return util.vector3(spot.x, spot.y, top - sl.pilingHalfHeight)
+end
+
+local function spawnPiling(sid, spot, k)
     local o = world.createObject(rec().decor.piling)
-    -- the piling mesh is centred on its origin: top at floor level
-    o:teleport('', util.vector3(spot.x, spot.y, c.sites[sid].pos.z - defs.slope.pilingHalfHeight),
-        { rotation = util.transform.rotateZ(spot.a) })
+    o:teleport('', pilingPos(sid, spot, k or 1), { rotation = util.transform.rotateZ(spot.a) })
     return o
+end
+
+-- Drives the i-th piling to `k`, in steps (no teleport every frame).
+local function drivePiling(sid, fx, i, k)
+    local step = math.floor(k * 20 + 1e-6)
+    fx.driven = fx.driven or {}
+    if fx.driven[i] == step then return end
+    fx.driven[i] = step
+    local o = fx.pilings[i]
+    if o and o:isValid() then
+        pcall(o.teleport, o, '', pilingPos(sid, fx.spots[i], step / 20), { rotation = util.transform.rotateZ(fx.spots[i].a) })
+    end
 end
 
 -- Timber pilings around the footprint wherever the ground drops away
@@ -368,14 +409,20 @@ local function syncSiteFx(sid)
         end
     end
     if s.leveled then
+        -- one after the other, each set up standing tall and driven down
         fx.spots = fx.spots or pilingSpots(sid)
-        local want = math.floor(#fx.spots * v.pilings + 1e-6)
+        local driven = #fx.spots * v.pilings
+        local want = math.min(#fx.spots, math.ceil(driven - 1e-6))
         while #fx.pilings > want do
             local o = table.remove(fx.pilings)
             if o:isValid() then o:remove() end
+            if fx.driven then fx.driven[#fx.pilings + 1] = nil end
         end
         while #fx.pilings < want do
-            fx.pilings[#fx.pilings + 1] = spawnPiling(sid, fx.spots[#fx.pilings + 1])
+            fx.pilings[#fx.pilings + 1] = spawnPiling(sid, fx.spots[#fx.pilings + 1], 0)
+        end
+        for i = 1, #fx.pilings do
+            drivePiling(sid, fx, i, math.max(0, math.min(1, driven - (i - 1))))
         end
     end
 end
@@ -414,7 +461,10 @@ local function spawnDecor(sid)
     -- may have finished during a time skip) go in now
     local fx = objs.sitefx[sid]
     if fx and fx.spots then
-        for _, o in ipairs(fx.pilings) do list[#list + 1] = o end
+        for i, o in ipairs(fx.pilings) do
+            drivePiling(sid, fx, i, 1)
+            list[#list + 1] = o
+        end
         for i = #fx.pilings + 1, #fx.spots do list[#list + 1] = spawnPiling(sid, fx.spots[i]) end
         fx.pilings = {}
     else
@@ -1652,7 +1702,7 @@ local function placeConfirm(e)
     local s = C.addSite(c, kind, plain(e.pos), e.yaw or 0, look.instant or false,
         { foundation = e.foundation, variant = variant, host = objs.insideHost })
     s.leveled = true -- e.pos.z is the computed floor level
-    s.radius = e.radius
+    s.radius, s.half = e.radius, e.half
     if look.price then
         -- bought: paid from the treasury and there at once
         c.gold = C.gold(c) - look.price
@@ -1705,7 +1755,7 @@ local function debugCommand(e)
         if e.gold then C.deposit(c, e.gold) end
     elseif e.cmd == 'build' and c then
         local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation, variant = e.variant, host = e.host })
-        s.leveled, s.radius = e.leveled, e.radius
+        s.leveled, s.radius, s.half = e.leveled, e.radius, e.half
         if e.built then setSiteObject(s.id) end
         processEvents()
     elseif e.cmd == 'tp' then
@@ -1978,6 +2028,9 @@ I.Activation.addHandlerForType(types.Activator, function(obj, actor)
         local d = site and defs.buildings[site.kind]
         if d and d.opensLedger and site.built then
             actor:sendEvent('TMW_OpenLedger')
+        elseif d and d.sleepOn and site.built then
+            -- beds and bedrolls work like the game's own: rest, and sleep
+            actor:sendEvent('TMW_Rest', { bed = obj })
         elseif not (site and site.built and d.small) then
             actor:sendEvent('TMW_OpenSite', { sid = sid })
         end

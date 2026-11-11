@@ -15,7 +15,7 @@ return {
                     local o = world.createObject(rec.id)
                     local x = v.x + (i - 1) * v.spacing - (#v.models - 1) * v.spacing / 2
                     local z = v.z or 20
-                    if e.onLand then z = core.land.getHeightAt(util.vector3(x, e.y, 0), player().cell) + (e.lift or 0) end
+                    if e.onLand then z = core.land.getHeightAt(util.vector3(x, e.y, 0), player().cell) + (v.lift or e.lift or 0) end
                     o:teleport('', util.vector3(x, e.y, z))
                     spawned[#spawned + 1] = { m = m, o = o }
                 end

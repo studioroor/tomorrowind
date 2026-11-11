@@ -116,8 +116,8 @@ part of the day, so layout matters. `tests/test_economy.lua` checks this balance
 - **Construction progress** (materials delivered, leveling and build %)
   shows in the ledger and over the building site you're looking at. You can
   also see it on site: delivered materials are stacked beside the scaffold
-  (logs, ore heaps, metal plates) and get used up, on slopes the pilings go in
-  one by one, and then the building itself comes up out of the ground, growing
+  (logs, ore heaps, metal plates) and get used up, on slopes the pilings are set
+  up along the walls one by one and driven down until the floor hides them, and then the building itself comes up out of the ground, growing
   from 80% to full size.
 - **Crews.** Buildings and furnishings take a limited number of settlers at
   once (`maxBuilders`): 2 for a chair, 4 for a tent, no limit for a house.
@@ -163,7 +163,7 @@ they are.
 
 The **Furnish** tab of the ledger has the small things that make a colony a
 home: campfires, lamp posts, paper lanterns, chairs, benches, tables,
-bookshelves, chests, bedrolls, beds, tents, fences, stone walls and gates.
+bookshelves, chests, bedrolls, beds, tents, shelters, a pavilion, fences, stone walls and gates.
 Laborers and builders make them like anything else, and removing one (look at
 it and press **Delete**) gives its materials back.
 
@@ -172,7 +172,11 @@ it and press **Delete**) gives its materials back.
   chairs and benches, with what they're using in hand. Each has room for so
   many at a time.
 - **Beds and bedrolls** add a bed each, and settlers visibly sleep on them.
+  Use one yourself to rest and sleep, as with any bed in the game.
 - **Tents** can be walked into, and you can place furniture inside.
+- **Shelters** are open hide canopies on poles, like those of Ashlander camps
+  and Dunmer markets: a roof over a table, beds or a workplace, open to every
+  side. The **Pavilion** is a big open tent on a deck.
 - **Chests** are real containers. Removing one hands you what's in it.
 - The tab has four parts: **Furniture**, **Lights**, **Decor** and **Structures**.
 - **Stairs, walkways and rope bridges** go on any surface you aim at, roofs

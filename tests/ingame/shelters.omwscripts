@@ -1,0 +1,2 @@
+GLOBAL: scripts/tomorrowind_test/shelters_global.lua
+PLAYER: scripts/tomorrowind_test/shelters.lua

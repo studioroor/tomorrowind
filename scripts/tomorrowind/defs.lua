@@ -187,6 +187,8 @@ defs.slope = {
     woodPerUnit = 1 / 20,    -- foundation timber per unit of gap
     workPerUnit = 1 / 4,     -- extra builder seconds per unit of gap
     pilingHalfHeight = 290,  -- ex_de_docks_piling.nif is centred, 580 tall (measured in game)
+    pilingSink = 70,         -- a driven piling's top ends this far below the floor
+    pilingDrive = 260,       -- and starts this far above where it ends up
 }
 
 -- Where a building's door is, from vanilla references: offset from the model's
@@ -488,6 +490,21 @@ defs.furnishOrder = {
             { label = 'Large tent', model = 'meshes/tomorrowind/tent_large.nif', scale = 1.1, lift = 200,
               props = { { decor = 'tentLargeLining', offset = { 0, 0, 150 }, scale = 1 } } },
         } }),
+    -- open to every side: a roof over furniture outdoors, like the hide
+    -- canopies of Ashlander camps and Dunmer markets
+    furnishing({ key = 'shelter', group = 'Structures', name = 'Shelter', model = 'meshes/x/ex_de_shack_awning_03.nif',
+        lift = 218, cost = { wood = 10 }, work = 8, hollow = true, rises = true, maxBuilders = 3,
+        desc = 'An open roof: put furniture under it',
+        variants = {
+            { label = 'Hide canopy' },
+            { label = 'Small hide canopy', model = 'meshes/x/ex_de_shack_awning_02.nif', lift = 278 },
+        } }),
+    -- the Velothi hill tent with its stilts in the ground: a deck under a
+    -- peaked hide roof, open at the sides (the deck's top is 31 above its
+    -- origin at full size)
+    furnishing({ key = 'pavilion', group = 'Structures', name = 'Pavilion', model = 'meshes/x/ex_velothi_hilltent_01.nif',
+        scale = 0.8, lift = -18, cost = { wood = 40 }, work = 24, hollow = true, rises = true, maxBuilders = 4,
+        desc = 'A big open tent on a deck' }),
     furnishing({ key = 'fence', group = 'Structures', name = 'Wooden Fence', model = 'meshes/x/furn_com_fence_02.nif',
         lift = 120, cost = { wood = 3 }, work = 3, segment = { half = 132 }, desc = 'Snaps to walls and fences' }),
     furnishing({ key = 'wall', group = 'Structures', name = 'Stone Wall', model = 'meshes/x/ex_drystonewall_s_01.nif',
