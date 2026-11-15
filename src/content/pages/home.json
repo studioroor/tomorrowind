@@ -16,17 +16,35 @@
     },
     {
       "type": "features",
-      "heading": "A colony that runs itself, mostly",
+      "heading": "A colony that runs itself, but needs a leader",
       "intro": "Press K, choose a spot and a storehouse goes up. Three settlers walk in. From there it's up to you.",
       "video": "/images/colony-timelapse.mp4",
       "poster": "/images/colony-poster.jpg",
       "items": [
-        { "title": "Settlers with jobs", "text": "Woodcutters, farmers, miners, smelters, builders, traders and guards. Each is a unique Dunmer with a name, a face and their own hours." },
-        { "title": "Build anywhere", "text": "Place houses, farms and workshops wherever you stand. On slopes they get timber pilings, driven in one by one." },
-        { "title": "Watch it go up", "text": "Materials pile up beside the scaffold, then the building rises out of the ground." },
-        { "title": "Trade with caravans", "text": "Run a market stall. Caravans come by every two days to buy your surplus and sell you what you're short of." },
-        { "title": "Homes you can walk into", "text": "Furnish rooms with beds, rugs, candles and shrines. At night you'll find your settlers asleep inside." },
-        { "title": "It keeps going while you're away", "text": "Go adventuring. The colony carries on, and you get a summary when you come back." }
+        {
+          "title": "Settlers with jobs",
+          "text": "Woodcutters, farmers, miners, smelters, builders, traders and guards. Each is a unique Dunmer with a name, a face and their own hours."
+        },
+        {
+          "title": "Build anywhere",
+          "text": "Place houses, farms and workshops wherever you stand. On slopes they get timber pilings, driven in one by one."
+        },
+        {
+          "title": "Watch it go up",
+          "text": "Materials pile up beside the scaffold, then the building rises out of the ground."
+        },
+        {
+          "title": "Trade with caravans",
+          "text": "Run a market stall. Caravans come by every two days to buy your surplus and sell you what you're short of."
+        },
+        {
+          "title": "Homes you can walk into",
+          "text": "Furnish rooms with beds, rugs, candles and shrines. At night you'll find your settlers asleep inside."
+        },
+        {
+          "title": "It keeps going while you're away",
+          "text": "Go adventuring. The colony carries on, and you get a summary when you come back."
+        }
       ]
     },
     {
@@ -34,11 +52,26 @@
       "heading": "Install",
       "requirements": "You need your own copy of **Morrowind** and [OpenMW](https://openmw.org) **0.52 or later**, already set up to run Morrowind.",
       "steps": [
-        { "title": "Download the zip", "body": "Use the download button on this page. You get `tomorrowind-vX.Y.Z.zip`." },
-        { "title": "Unzip it somewhere it can stay", "body": "You get a folder called `tomorrowind`. OpenMW loads the mod from there, so don't move or delete it afterwards." },
-        { "title": "Add the folder in the OpenMW launcher", "body": "Open **Data Files**, go to **Data Directories** and add the `tomorrowind` folder: the one with the two `Tomorrowind.*` files directly in it." },
-        { "title": "Tick both content files", "body": "On the **Content Files** tab, enable `Tomorrowind.omwaddon` and `Tomorrowind.omwscripts`, below `Morrowind.esm`." },
-        { "title": "Found your colony", "body": "Load a save or start a new game, stand somewhere outdoors and flat, and press **K**." }
+        {
+          "title": "Download the zip",
+          "body": "Use the download button on this page. You get `tomorrowind-vX.Y.Z.zip`."
+        },
+        {
+          "title": "Unzip it somewhere it can stay",
+          "body": "You get a folder called `tomorrowind`. OpenMW loads the mod from there, so don't move or delete it afterwards."
+        },
+        {
+          "title": "Add the folder in the OpenMW launcher",
+          "body": "Open **Data Files**, go to **Data Directories** and add the `tomorrowind` folder: the one with the two `Tomorrowind.*` files directly in it."
+        },
+        {
+          "title": "Tick both content files",
+          "body": "On the **Content Files** tab, enable `Tomorrowind.omwaddon` and `Tomorrowind.omwscripts`, below `Morrowind.esm`."
+        },
+        {
+          "title": "Found your colony",
+          "body": "Load a save or start a new game, stand somewhere outdoors and flat, and press **K**."
+        }
       ],
       "manual": "**Without the launcher**, add these lines to `openmw.cfg`, with your own path:\n\n```\ndata=\"/path/to/tomorrowind\"\ncontent=Tomorrowind.omwaddon\ncontent=Tomorrowind.omwscripts\n```\n\n**Updating:** quit the game, replace the `tomorrowind` folder with the new one, and keep both content files ticked. Back up a save you care about first."
     },
@@ -51,8 +84,14 @@
       "type": "videos",
       "heading": "Videos",
       "items": [
-        { "title": "Tomorrowind 0.2 trailer", "youtube": "https://youtu.be/5PStEtBelwY" },
-        { "title": "Tomorrowind 0.1 trailer", "youtube": "https://youtu.be/NmWk1tiWo_A" }
+        {
+          "title": "Tomorrowind 0.2 trailer",
+          "youtube": "https://youtu.be/5PStEtBelwY"
+        },
+        {
+          "title": "Tomorrowind 0.1 trailer",
+          "youtube": "https://youtu.be/NmWk1tiWo_A"
+        }
       ]
     },
     {
