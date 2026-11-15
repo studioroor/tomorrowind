@@ -1,14 +1,27 @@
 import { Marked } from 'marked'
 
+const BASE = import.meta.env.BASE_URL.replace(/\/+$/, '')
+
+/**
+ * A path on this site with the base it's published under (see astro.config.mjs):
+ * withBase('/releases/') is '/tomorrowind/releases/' on GitHub Pages. Other
+ * URLs, and paths that already have the base, are returned as they are.
+ */
+export function withBase(path: string): string {
+  if (!BASE || !path.startsWith('/') || path.startsWith('//')) return path
+  if (path === BASE || path.startsWith(`${BASE}/`) || path.startsWith(`${BASE}#`)) return path
+  return `${BASE}${path}`
+}
+
 /**
  * The URL if it's safe to put in an href or src: http(s), mailto or a path on
  * this site. Anything else (javascript:, data:, …) becomes undefined, so a link
- * typed in the CMS can't run a script.
+ * typed in the CMS can't run a script. Paths on this site get the base.
  */
 export function safeUrl(url: string | undefined | null): string | undefined {
   if (!url) return undefined
   const trimmed = url.trim()
-  if (/^(\/(?!\/)|#|\.{0,2}\/)/.test(trimmed)) return trimmed
+  if (/^(\/(?!\/)|#|\.{0,2}\/)/.test(trimmed)) return withBase(trimmed)
   try {
     const { protocol } = new URL(trimmed)
     return ['http:', 'https:', 'mailto:'].includes(protocol) ? trimmed : undefined

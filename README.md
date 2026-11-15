@@ -41,8 +41,28 @@ so publishing the post is all it takes to switch the site over.
   Open Font License (`MysticCardsFontLicense.txt`). Body text is Alegreya from Google Fonts.
 - YouTube videos load only when someone presses play, from `youtube-nocookie.com`.
 
+## Where it lives
+
+The website is the **`site` branch** of the mod's repository. It has its own history, separate
+from `main`: the mod's commits don't show up here, the website's (including every publish from
+the CMS) don't show up on `main`, and a clone of `main` doesn't include the website.
+
+```sh
+git worktree add ../tomorrowind-site site   # work on the website next to the mod
+```
+
+In Drikus CMS, link the site to the `tomorrowind` repository with branch **`site`**.
+
 ## Hosting
 
-GitHub Pages is set up in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml): in the
-repository go to _Settings → Pages_ and set _Source_ to **GitHub Actions**. Use its own domain or
-subdomain (uploads are linked from the root) and set it as `site` in `astro.config.mjs`.
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) builds the site on every push to
+`site` and publishes it on GitHub Pages at **https://studioroor.github.io/tomorrowind/**. Once:
+
+1. _Settings → Pages_: set _Source_ to **GitHub Actions**.
+2. _Settings → Environments → github-pages_: under _Deployment branches and tags_, add `site`
+   (by default only `main` may deploy).
+
+The site is published under `/tomorrowind/`. Content keeps paths from the root (`/images/…`,
+`/uploads/…`) and the site adds the base to them, so moving to a custom domain later means: set
+`site` to the domain and `base` to `'/'` in `astro.config.mjs`, and add the domain in _Settings →
+Pages_. No content has to change.

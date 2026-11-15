@@ -1,11 +1,11 @@
-# Builds the site and publishes it on GitHub Pages after every change, also
-# the ones made in Drikus CMS. The CMS shows this run as the deploy status.
-# Using Cloudflare Pages instead? Delete this file (see README).
-name: Deploy
+# Builds the website and publishes it on GitHub Pages after every change to
+# the `site` branch, also the ones made in Drikus CMS. The CMS shows this run
+# as the deploy status. The mod itself lives on `main` and isn't touched.
+name: Deploy website
 
 on:
   push:
-    branches: [main]
+    branches: [site]
   workflow_dispatch:
 
 permissions:

@@ -1,6 +1,6 @@
 ---
 import type { CollectionEntry } from 'astro:content'
-import { formatDate } from '../lib'
+import { formatDate, withBase } from '../lib'
 
 interface Props {
   releases: CollectionEntry<'releases'>[]
@@ -17,7 +17,7 @@ const { releases } = Astro.props
         </span>
         <div>
           <h3>
-            <a href={`/releases/${r.id}/`}>{r.data.title}</a>
+            <a href={withBase(`/releases/${r.id}/`)}>{r.data.title}</a>
           </h3>
           <time datetime={r.data.date.toISOString().slice(0, 10)}>{formatDate(r.data.date)}</time>
           {r.data.summary && <p>{r.data.summary}</p>}

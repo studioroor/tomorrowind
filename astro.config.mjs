@@ -1,8 +1,10 @@
 import { defineConfig } from 'astro/config'
 
-// The address the site is published at. Images uploaded in the CMS are linked
-// from the root (/uploads/…), so publish on its own (sub)domain.
-// TODO: placeholder domain, set the real one before going live.
+// Published on GitHub Pages at https://studioroor.github.io/tomorrowind/.
+// Content keeps root paths (/images/…, /uploads/…) and the site adds `base`
+// to them (withBase in src/lib.ts). With a custom domain: set `site` to it,
+// set `base` to '/', and add the domain under Settings → Pages.
 export default defineConfig({
-  site: 'https://tomorrowind.studioroor.nl',
+  site: 'https://studioroor.github.io',
+  base: '/tomorrowind',
 })

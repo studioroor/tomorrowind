@@ -1,4 +1,6 @@
 ---
+import fontUrl from '../assets/fonts/MysticCards.ttf?url'
+import { withBase } from '../lib'
 import settings from '../settings'
 
 interface Props {
@@ -10,6 +12,7 @@ interface Props {
 const { title, description = settings.description, overlay = false } = Astro.props
 const pageTitle = title === settings.name ? `${title}: ${settings.tagline}` : `${title} – ${settings.name}`
 const socialImage = new URL(settings.socialImage, Astro.site ?? Astro.url).href
+const home = withBase('/')
 ---
 
 <!doctype html>
@@ -17,14 +20,14 @@ const socialImage = new URL(settings.socialImage, Astro.site ?? Astro.url).href
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href={withBase('/favicon.svg')} type="image/svg+xml" />
     <title>{pageTitle}</title>
     <meta name="description" content={description} />
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={socialImage} />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="preload" href="/fonts/MysticCards.ttf" as="font" type="font/ttf" crossorigin />
+    <link rel="preload" href={fontUrl} as="font" type="font/ttf" crossorigin />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -35,12 +38,12 @@ const socialImage = new URL(settings.socialImage, Astro.site ?? Astro.url).href
   <body>
     <a class="skip" href="#main">Skip to content</a>
     <header class:list={['site-header', { overlay }]}>
-      <a class="brand" href="/">{settings.name}</a>
+      <a class="brand" href={home}>{settings.name}</a>
       <nav aria-label="Main">
-        <a href="/#install">Download</a>
-        <a href="/releases/">Releases</a>
-        <a href="/#videos">Videos</a>
-        <a href="/#support">Support</a>
+        <a href={`${home}#install`}>Download</a>
+        <a href={withBase('/releases/')}>Releases</a>
+        <a href={`${home}#videos`}>Videos</a>
+        <a href={`${home}#support`}>Support</a>
       </nav>
     </header>
     <main id="main">
@@ -65,7 +68,7 @@ const socialImage = new URL(settings.socialImage, Astro.site ?? Astro.url).href
 <style is:global>
   @font-face {
     font-family: 'MysticCards';
-    src: url('/fonts/MysticCards.ttf') format('truetype');
+    src: url('../assets/fonts/MysticCards.ttf') format('truetype');
     font-display: swap;
   }
 

@@ -1,6 +1,6 @@
 ---
 import settings from '../settings'
-import { formatDate, renderMarkdown, safeUrl } from '../lib'
+import { formatDate, renderMarkdown, safeUrl, withBase } from '../lib'
 import { latestRelease, publishedReleases } from '../releases'
 import ReleaseList from './ReleaseList.astro'
 import YouTube from './YouTube.astro'
@@ -127,7 +127,7 @@ const md = (s?: string) => renderMarkdown(s)
                   Download {latest.data.version} <small>zip</small>
                 </a>
                 <p>
-                  <a href={`/releases/${latest.id}/`}>What's new in {latest.data.version}</a>
+                  <a href={withBase(`/releases/${latest.id}/`)}>What's new in {latest.data.version}</a>
                 </p>
                 <p class="download-older">
                   Older versions are on <a href={settings.links.releases}>GitHub</a>.
@@ -143,7 +143,7 @@ const md = (s?: string) => renderMarkdown(s)
         <section class="block wrap" id="releases">
           <div class="block-head">
             {s.heading && <h2>{s.heading}</h2>}
-            <a href="/releases/">All releases</a>
+            <a href={withBase('/releases/')}>All releases</a>
           </div>
           <ReleaseList releases={releases.slice(0, s.count ?? 3)} />
         </section>

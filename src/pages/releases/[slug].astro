@@ -1,7 +1,7 @@
 ---
 import YouTube from '../../components/YouTube.astro'
 import Layout from '../../layouts/Layout.astro'
-import { formatDate, renderMarkdown } from '../../lib'
+import { formatDate, renderMarkdown, withBase } from '../../lib'
 import { latestRelease, publishedReleases } from '../../releases'
 
 export async function getStaticPaths() {
@@ -21,7 +21,7 @@ const { data } = release
 <Layout title={data.title} description={data.summary}>
   <article class="wrap release">
     <header>
-      <p class="crumb"><a href="/releases/">Releases</a></p>
+      <p class="crumb"><a href={withBase('/releases/')}>Releases</a></p>
       <h1>{data.title}</h1>
       <p class="meta">
         Version {data.version}, released <time datetime={data.date.toISOString().slice(0, 10)}>{formatDate(data.date)}</time>
@@ -34,7 +34,7 @@ const { data } = release
             </a>
             {!isLatest && latest && (
               <span class="newer-note">
-                There's a newer version: <a href={`/releases/${latest.id}/`}>{latest.data.version}</a>.
+                There's a newer version: <a href={withBase(`/releases/${latest.id}/`)}>{latest.data.version}</a>.
               </span>
             )}
           </p>
@@ -54,12 +54,12 @@ const { data } = release
 
     <div class="prose">
       <Fragment set:html={renderMarkdown(release.body)} />
-      <p class="install-link">New to Tomorrowind? <a href="/#install">How to install it</a>.</p>
+      <p class="install-link">New to Tomorrowind? <a href={`${withBase('/')}#install`}>How to install it</a>.</p>
     </div>
 
     <nav class="pager" aria-label="Other releases">
-      {older ? <a href={`/releases/${older.id}/`}>Older: {older.data.title}</a> : <span />}
-      {newer && <a href={`/releases/${newer.id}/`}>Newer: {newer.data.title}</a>}
+      {older ? <a href={withBase(`/releases/${older.id}/`)}>Older: {older.data.title}</a> : <span />}
+      {newer && <a href={withBase(`/releases/${newer.id}/`)}>Newer: {newer.data.title}</a>}
     </nav>
   </article>
 </Layout>
