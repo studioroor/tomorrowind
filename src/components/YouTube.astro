@@ -48,7 +48,9 @@ const thumb = (size: string) => `https://i.ytimg.com/vi/${id}/${size}.jpg`
     frame.title = link.dataset.title ?? 'YouTube video'
     frame.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen'
     frame.allowFullscreen = true
-    frame.className = link.className
+    // Created here, so it doesn't get Astro's scoped-style attribute: it's
+    // sized by the global .yt-frame rule below.
+    frame.className = 'yt-frame'
     link.replaceWith(frame)
     frame.focus()
   })
@@ -101,8 +103,13 @@ const thumb = (size: string) => `https://i.ytimg.com/vi/${id}/${size}.jpg`
     fill: var(--gold);
     translate: 6% 0;
   }
-  iframe.yt {
-    border: 0;
+  :global(.yt-frame) {
+    display: block;
+    width: 100%;
     height: auto;
+    aspect-ratio: 16 / 9;
+    border: 0;
+    border-radius: 6px;
+    background: #000;
   }
 </style>
