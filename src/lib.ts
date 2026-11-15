@@ -1,10 +1,31 @@
 import { Marked } from 'marked'
 
-// Rich text from the CMS is Markdown. Raw HTML in it is shown as text, so a
-// pasted <script> can't run on the site.
+/**
+ * The URL if it's safe to put in an href or src: http(s), mailto or a path on
+ * this site. Anything else (javascript:, data:, …) becomes undefined, so a link
+ * typed in the CMS can't run a script.
+ */
+export function safeUrl(url: string | undefined | null): string | undefined {
+  if (!url) return undefined
+  const trimmed = url.trim()
+  if (/^(\/(?!\/)|#|\.{0,2}\/)/.test(trimmed)) return trimmed
+  try {
+    const { protocol } = new URL(trimmed)
+    return ['http:', 'https:', 'mailto:'].includes(protocol) ? trimmed : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Rich text from the CMS is Markdown. Raw HTML in it is shown as text, and
+// links and images with an unsafe address lose it, so nothing pasted can run
+// on the site.
 const markdown = new Marked({
   renderer: {
     html: ({ text }) => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
+  },
+  walkTokens(token) {
+    if (token.type === 'link' || token.type === 'image') token.href = safeUrl(token.href) ?? ''
   },
 })
 

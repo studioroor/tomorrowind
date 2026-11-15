@@ -1,8 +1,7 @@
 ---
-import { render } from 'astro:content'
 import YouTube from '../../components/YouTube.astro'
 import Layout from '../../layouts/Layout.astro'
-import { formatDate } from '../../lib'
+import { formatDate, renderMarkdown } from '../../lib'
 import { latestRelease, publishedReleases } from '../../releases'
 
 export async function getStaticPaths() {
@@ -14,7 +13,6 @@ export async function getStaticPaths() {
 }
 
 const { release, newer, older } = Astro.props
-const { Content } = await render(release)
 const latest = await latestRelease()
 const isLatest = latest?.id === release.id
 const { data } = release
@@ -55,7 +53,7 @@ const { data } = release
     }
 
     <div class="prose">
-      <Content />
+      <Fragment set:html={renderMarkdown(release.body)} />
       <p class="install-link">New to Tomorrowind? <a href="/#install">How to install it</a>.</p>
     </div>
 

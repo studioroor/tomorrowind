@@ -1,6 +1,6 @@
 ---
-import settings from '../data/settings.json'
-import { formatDate, renderMarkdown } from '../lib'
+import settings from '../settings'
+import { formatDate, renderMarkdown, safeUrl } from '../lib'
 import { latestRelease, publishedReleases } from '../releases'
 import ReleaseList from './ReleaseList.astro'
 import YouTube from './YouTube.astro'
@@ -44,7 +44,7 @@ const md = (s?: string) => renderMarkdown(s)
     if (s.type === 'hero')
       return (
         <section class="hero">
-          {s.image && <img class="hero-image" src={s.image} alt="" fetchpriority="high" />}
+          {safeUrl(s.image) && <img class="hero-image" src={safeUrl(s.image)} alt="" fetchpriority="high" />}
           <div class="hero-content wrap">
             <h1>{s.heading}</h1>
             {s.text && <p class="hero-text">{s.text}</p>}
@@ -91,9 +91,9 @@ const md = (s?: string) => renderMarkdown(s)
           {(s.video || s.poster) && (
             <figure class="features-media">
               {s.video ? (
-                <video src={s.video} poster={s.poster} muted loop playsinline preload="metadata" data-autoplay />
+                <video src={safeUrl(s.video)} poster={safeUrl(s.poster)} muted loop playsinline preload="metadata" data-autoplay />
               ) : (
-                <img src={s.poster} alt="" loading="lazy" />
+                <img src={safeUrl(s.poster)} alt="" loading="lazy" />
               )}
               {s.video && <figcaption>A colony going up, in eight seconds.</figcaption>}
             </figure>
