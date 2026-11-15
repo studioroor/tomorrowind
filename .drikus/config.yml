@@ -1,0 +1,147 @@
+# yaml-language-server: $schema=https://github.com/studioroor/drikus-cms/raw/main/schema/drikus-config.schema.json
+#
+# What can be edited in Drikus CMS. Field names match src/content.config.ts
+# (releases) and the types in src/components/Sections.astro (homepage blocks).
+# All options: https://github.com/studioroor/drikus-cms/blob/main/docs/content-config.md
+
+icon: public/favicon.svg
+
+media:
+  folder: public/uploads # served at /uploads
+  maxWidth: 1920
+
+collections:
+  - name: releases
+    label: { nl: Releases, en: Releases }
+    description:
+      nl: Een bericht per versie, met de download en de video
+      en: One post per version, with the download and the video
+    folder: src/content/releases
+    slug: "v{{version}}"
+    summary: title
+    sortBy: date
+    sortOrder: desc
+    fields:
+      - { name: title, label: Title, required: true, hint: "For example: 0.3: the island" }
+      - { name: version, label: Version, required: true, hint: "Without the v, for example 0.3.0" }
+      - { name: date, label: Date, type: date, required: true }
+      - name: summary
+        label: Summary
+        type: text
+        maxLength: 280
+        hint: One or two sentences for the list of releases
+      - name: download
+        label: Download link
+        type: url
+        hint: The zip under Assets on the GitHub release. The newest release with a link is the one the Download buttons use.
+      - { name: youtube, label: YouTube video, type: url, hint: "A youtu.be or youtube.com link" }
+      - { name: cover, label: Image, type: image, hint: Shown when there's no video }
+      - { name: draft, label: Hidden, type: boolean, hint: Not shown on the website yet }
+      - { name: body, label: Text, type: richtext }
+
+  - name: home
+    label: { nl: Homepage, en: Homepage }
+    file: src/content/pages/home.json
+    fields:
+      - { name: title, label: Page title, required: true }
+      - name: sections
+        label: Sections
+        type: blocks
+        blocks:
+          - name: hero
+            label: Banner
+            fields:
+              - { name: heading, label: Heading, required: true }
+              - { name: text, label: Text, type: text }
+              - { name: image, label: Background image, type: image }
+              - { name: note, label: Small print under the buttons }
+          - name: trailer
+            label: Trailer
+            fields:
+              - { name: heading, label: Heading }
+              - { name: youtube, label: YouTube video, type: url, required: true }
+              - { name: text, label: Text, type: text }
+          - name: features
+            label: Features
+            fields:
+              - { name: heading, label: Heading }
+              - { name: intro, label: Intro, type: text }
+              - { name: video, label: Looping video (MP4, no sound), type: file }
+              - { name: poster, label: Image (shown before the video plays, or instead of it), type: image }
+              - name: items
+                label: Features
+                type: list
+                fields:
+                  - { name: title, label: Title, required: true }
+                  - { name: text, label: Text, type: text }
+          - name: install
+            label: Installation
+            fields:
+              - { name: heading, label: Heading }
+              - { name: requirements, label: What you need, type: richtext }
+              - name: steps
+                label: Steps
+                type: list
+                fields:
+                  - { name: title, label: Step, required: true }
+                  - { name: body, label: Explanation, type: richtext }
+              - { name: manual, label: Below the steps, type: richtext }
+          - name: releases
+            label: Latest releases
+            fields:
+              - { name: heading, label: Heading }
+              - { name: count, label: How many, type: number, min: 1, max: 10, default: 3 }
+          - name: videos
+            label: Videos
+            fields:
+              - { name: heading, label: Heading }
+              - name: items
+                label: Videos
+                type: list
+                fields:
+                  - { name: title, label: Title, required: true }
+                  - { name: youtube, label: YouTube video, type: url, required: true }
+          - name: studio
+            label: Studio Roor and support
+            fields:
+              - { name: heading, label: Heading }
+          - name: text
+            label: Text
+            fields:
+              - { name: heading, label: Heading }
+              - { name: body, label: Text, type: richtext }
+
+  - name: settings
+    label: { nl: Gegevens, en: Details }
+    description:
+      nl: Links, Studio Roor en Buy Me a Coffee
+      en: Links, Studio Roor and Buy Me a Coffee
+    file: src/data/settings.json
+    fields:
+      - { name: name, label: Name, required: true }
+      - { name: tagline, label: Tagline }
+      - { name: description, label: Description for search engines, type: text, maxLength: 200 }
+      - { name: socialImage, label: Image when shared, type: image, hint: 1280 × 640 }
+      - name: links
+        label: Links
+        type: object
+        fields:
+          - { name: github, label: GitHub repository, type: url }
+          - { name: releases, label: GitHub releases, type: url }
+          - { name: issues, label: Ideas and bugs, type: url }
+          - { name: youtube, label: YouTube channel, type: url }
+      - name: studio
+        label: Studio Roor
+        type: object
+        fields:
+          - { name: name, label: Name }
+          - { name: url, label: Website, type: url }
+          - { name: description, label: Description, type: text }
+      - name: support
+        label: Support
+        type: object
+        fields:
+          - { name: url, label: Buy Me a Coffee link, type: url }
+          - { name: label, label: Button text }
+          - { name: text, label: Text, type: text }
+      - { name: footerNote, label: Footer note, type: text }

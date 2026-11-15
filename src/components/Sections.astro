@@ -1,0 +1,519 @@
+---
+import settings from '../data/settings.json'
+import { formatDate, renderMarkdown } from '../lib'
+import { latestRelease, publishedReleases } from '../releases'
+import ReleaseList from './ReleaseList.astro'
+import YouTube from './YouTube.astro'
+
+// The blocks of the homepage, as edited under "Sections" in the CMS.
+// Keep these in sync with the "home" collection in .drikus/config.yml.
+type Section =
+  | { type: 'hero'; heading: string; text?: string; image?: string; note?: string }
+  | { type: 'trailer'; heading?: string; youtube: string; text?: string }
+  | {
+      type: 'features'
+      heading?: string
+      intro?: string
+      video?: string
+      poster?: string
+      items?: { title: string; text?: string }[]
+    }
+  | {
+      type: 'install'
+      heading?: string
+      requirements?: string
+      steps?: { title: string; body?: string }[]
+      manual?: string
+    }
+  | { type: 'releases'; heading?: string; count?: number }
+  | { type: 'videos'; heading?: string; items?: { title: string; youtube: string }[] }
+  | { type: 'studio'; heading?: string }
+  | { type: 'text'; heading?: string; body?: string }
+
+interface Props {
+  sections: Section[]
+}
+const { sections } = Astro.props
+const latest = await latestRelease()
+const releases = await publishedReleases()
+const md = (s?: string) => renderMarkdown(s)
+---
+
+{
+  sections.map((s) => {
+    if (s.type === 'hero')
+      return (
+        <section class="hero">
+          {s.image && <img class="hero-image" src={s.image} alt="" fetchpriority="high" />}
+          <div class="hero-content wrap">
+            <h1>{s.heading}</h1>
+            {s.text && <p class="hero-text">{s.text}</p>}
+            <div class="actions">
+              {latest && (
+                <a class="button" href={latest.data.download}>
+                  Download {latest.data.version}
+                  <small>zip</small>
+                </a>
+              )}
+              <a class="button ghost" href="#install">
+                How to install
+              </a>
+            </div>
+            {s.note && <p class="hero-note">{s.note}</p>}
+          </div>
+        </section>
+      )
+
+    if (s.type === 'trailer')
+      return (
+        <section class="trailer wrap" id="trailer">
+          {s.heading && <h2>{s.heading}</h2>}
+          <YouTube url={s.youtube} title={s.heading ?? 'Trailer'} large />
+          {s.text && <p class="caption">{s.text}</p>}
+        </section>
+      )
+
+    if (s.type === 'features')
+      return (
+        <section class="features wrap">
+          <div class="features-text">
+            {s.heading && <h2>{s.heading}</h2>}
+            {s.intro && <p class="lead">{s.intro}</p>}
+            <dl>
+              {(s.items ?? []).map((item) => (
+                <div>
+                  <dt>{item.title}</dt>
+                  {item.text && <dd>{item.text}</dd>}
+                </div>
+              ))}
+            </dl>
+          </div>
+          {(s.video || s.poster) && (
+            <figure class="features-media">
+              {s.video ? (
+                <video src={s.video} poster={s.poster} muted loop playsinline preload="metadata" data-autoplay />
+              ) : (
+                <img src={s.poster} alt="" loading="lazy" />
+              )}
+              {s.video && <figcaption>A colony going up, in eight seconds.</figcaption>}
+            </figure>
+          )}
+        </section>
+      )
+
+    if (s.type === 'install')
+      return (
+        <section class="install" id="install">
+          <div class="install-inner wrap">
+            <div class="install-steps">
+              {s.heading && <h2>{s.heading}</h2>}
+              {s.requirements && <div class="requirements" set:html={md(s.requirements)} />}
+              <ol class="steps">
+                {(s.steps ?? []).map((step) => (
+                  <li>
+                    <h3>{step.title}</h3>
+                    {step.body && <div set:html={md(step.body)} />}
+                  </li>
+                ))}
+              </ol>
+              {s.manual && <div class="manual" set:html={md(s.manual)} />}
+            </div>
+            {latest && (
+              <aside class="download-card" aria-label="Latest version">
+                <p class="download-label">Latest version</p>
+                <p class="download-version">{latest.data.version}</p>
+                <p class="download-date">Released {formatDate(latest.data.date)}</p>
+                <a class="button" href={latest.data.download}>
+                  Download {latest.data.version} <small>zip</small>
+                </a>
+                <p>
+                  <a href={`/releases/${latest.id}/`}>What's new in {latest.data.version}</a>
+                </p>
+                <p class="download-older">
+                  Older versions are on <a href={settings.links.releases}>GitHub</a>.
+                </p>
+              </aside>
+            )}
+          </div>
+        </section>
+      )
+
+    if (s.type === 'releases')
+      return (
+        <section class="block wrap" id="releases">
+          <div class="block-head">
+            {s.heading && <h2>{s.heading}</h2>}
+            <a href="/releases/">All releases</a>
+          </div>
+          <ReleaseList releases={releases.slice(0, s.count ?? 3)} />
+        </section>
+      )
+
+    if (s.type === 'videos')
+      return (
+        <section class="block wrap" id="videos">
+          <div class="block-head">
+            {s.heading && <h2>{s.heading}</h2>}
+            <a href={settings.links.youtube}>More on YouTube</a>
+          </div>
+          <ul class="video-grid">
+            {(s.items ?? []).map((v) => (
+              <li>
+                <YouTube url={v.youtube} title={v.title} />
+                <p>{v.title}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )
+
+    if (s.type === 'studio')
+      return (
+        <section class="studio wrap" id="support">
+          <div>
+            {s.heading && <h2>{s.heading}</h2>}
+            <p>{settings.studio.description}</p>
+            <a href={settings.studio.url}>Visit {settings.studio.name}</a>
+          </div>
+          <div class="support">
+            <p>{settings.support.text}</p>
+            <a class="button" href={settings.support.url}>
+              <svg class="cup" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 8h13v5a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6zM17 10h1.5a2.5 2.5 0 0 1 0 5H17M8 2.5c0 1.5 1.5 1.5 1.5 3M12 2.5c0 1.5 1.5 1.5 1.5 3" />
+              </svg>
+              {settings.support.label}
+            </a>
+          </div>
+        </section>
+      )
+
+    if (s.type === 'text')
+      return (
+        <section class="block wrap">
+          {s.heading && <h2>{s.heading}</h2>}
+          <div class="prose" set:html={md(s.body)} />
+        </section>
+      )
+
+    return null
+  })
+}
+
+<script>
+  // The colony timelapse plays on its own, unless someone prefers less motion:
+  // then it waits with its controls showing.
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches
+  for (const video of document.querySelectorAll<HTMLVideoElement>('video[data-autoplay]')) {
+    if (still) {
+      video.controls = true
+      continue
+    }
+    new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) video.play().catch(() => (video.controls = true))
+      else video.pause()
+    }).observe(video)
+  }
+</script>
+
+<style>
+  /* Banner: the dusk shot, with the day breaking over it once on load. */
+  .hero {
+    position: relative;
+    min-height: min(92svh, 60rem);
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .hero-image {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 40% 60%;
+    z-index: -2;
+    animation: daybreak 2.8s ease-out both;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      linear-gradient(to bottom, rgb(20 24 22 / 0.55), transparent 18%),
+      linear-gradient(to top, var(--ground) 2%, rgb(34 42 39 / 0.75) 30%, transparent 65%),
+      linear-gradient(to right, rgb(34 42 39 / 0.6), transparent 60%);
+  }
+  @keyframes daybreak {
+    from {
+      filter: brightness(0.45) saturate(0.6);
+      transform: scale(1.04);
+    }
+    to {
+      filter: none;
+      transform: none;
+    }
+  }
+  .hero-content {
+    padding-block: 8rem 3.5rem;
+  }
+  .hero h1 {
+    font-size: clamp(3.6rem, 13vw, 9.5rem);
+    color: var(--gold);
+    margin-bottom: 0.15em;
+    text-shadow:
+      0 2px 0 #46301a,
+      0 4px 30px rgb(0 0 0 / 0.6);
+    animation: rise 1.6s 0.6s ease-out both;
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      translate: 0 0.15em;
+    }
+  }
+  .hero-text {
+    font-size: clamp(1.15rem, 2.2vw, 1.45rem);
+    line-height: 1.45;
+    max-width: 34rem;
+    text-shadow: 0 1px 12px rgb(0 0 0 / 0.7);
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.75rem;
+  }
+  .hero-note {
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+
+  .trailer {
+    margin-top: 4rem;
+  }
+  .caption {
+    color: var(--muted);
+    margin-top: 0.9rem;
+    max-width: 44rem;
+  }
+
+  /* Features: the list on the left, the timelapse beside it. */
+  .features {
+    margin-top: 7rem;
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 3rem 4rem;
+    align-items: start;
+  }
+  .lead {
+    font-size: 1.25rem;
+    line-height: 1.45;
+    max-width: 30rem;
+  }
+  dl {
+    margin: 2rem 0 0;
+    display: grid;
+    gap: 1.25rem;
+  }
+  dt {
+    font-weight: 700;
+    color: var(--gold);
+  }
+  dd {
+    margin: 0.1rem 0 0;
+    max-width: 32rem;
+  }
+  .features-media {
+    position: sticky;
+    top: 2rem;
+    margin: 0;
+  }
+  .features-media video,
+  .features-media img {
+    width: 100%;
+    border-radius: 6px;
+    box-shadow: 0 0 0 1px var(--line), 0 30px 60px -30px rgb(0 0 0 / 0.8);
+  }
+  figcaption {
+    margin-top: 0.75rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+
+  /* Install: the one light band on the page, the colour of the dusk sky. */
+  .install {
+    margin-top: 7rem;
+    padding-block: 5rem;
+    background: linear-gradient(165deg, var(--lavender) 0%, #c9b3c4 45%, var(--peach) 100%);
+    color: var(--dusk-ink);
+  }
+  .install-steps :global(a) {
+    color: #5c3216;
+    font-weight: 500;
+  }
+  .install h2 {
+    color: var(--dusk-ink);
+  }
+  .install-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 20rem;
+    gap: 3rem 5rem;
+    align-items: start;
+  }
+  .requirements {
+    font-size: 1.15rem;
+    max-width: 36rem;
+  }
+  .steps {
+    list-style: none;
+    counter-reset: step;
+    margin: 2.5rem 0;
+    padding: 0;
+    display: grid;
+    gap: 1.75rem;
+  }
+  .steps li {
+    counter-increment: step;
+    display: grid;
+    grid-template-columns: 3.5rem 1fr;
+    max-width: 38rem;
+  }
+  .steps li::before {
+    content: counter(step);
+    font-family: var(--display);
+    font-size: 2.6rem;
+    line-height: 0.9;
+    color: #7a4e2a;
+  }
+  .steps li > * {
+    grid-column: 2;
+  }
+  .steps :global(p) {
+    margin: 0;
+  }
+  .manual {
+    max-width: 38rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgb(38 32 31 / 0.25);
+  }
+  .download-card {
+    position: sticky;
+    top: 2rem;
+    padding: 1.75rem;
+    border-radius: 6px;
+    background: var(--ground);
+    color: var(--ink);
+    box-shadow: 0 30px 60px -30px rgb(38 32 31 / 0.7);
+  }
+  .download-card a:not(.button) {
+    color: var(--gold);
+  }
+  .download-card p {
+    margin: 0;
+  }
+  .download-label {
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .download-version {
+    font-family: var(--display);
+    font-size: 4rem;
+    line-height: 1;
+    color: var(--gold);
+  }
+  .download-date {
+    color: var(--muted);
+    margin-bottom: 1.5rem !important;
+  }
+  .download-card .button {
+    width: 100%;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+  }
+  .download-older {
+    margin-top: 0.5rem !important;
+    font-size: 0.9rem;
+    color: var(--muted);
+  }
+
+  .block {
+    margin-top: 7rem;
+  }
+  .block-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem 2rem;
+    margin-bottom: 1.5rem;
+  }
+  .block-head h2 {
+    margin: 0;
+  }
+
+  .video-grid {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+    gap: 2rem;
+  }
+  .video-grid p {
+    margin: 0.75rem 0 0;
+    font-weight: 500;
+  }
+
+  .studio {
+    margin-top: 7rem;
+    padding-top: 4rem;
+    border-top: 1px solid var(--line);
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 3rem 5rem;
+  }
+  .studio p {
+    max-width: 36rem;
+  }
+  .support {
+    align-self: end;
+    padding: 1.75rem;
+    border-radius: 6px;
+    background: var(--ground-2);
+  }
+  .cup {
+    width: 1.3em;
+    height: 1.3em;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  @media (max-width: 56rem) {
+    .features,
+    .install-inner,
+    .studio {
+      grid-template-columns: 1fr;
+    }
+    .features-media,
+    .download-card {
+      position: static;
+    }
+    .download-card {
+      max-width: 24rem;
+    }
+  }
+  @media (max-width: 36rem) {
+    .steps li {
+      grid-template-columns: 2.5rem 1fr;
+    }
+    .steps li::before {
+      font-size: 2rem;
+    }
+  }
+</style>

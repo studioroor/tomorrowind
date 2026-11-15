@@ -1,0 +1,82 @@
+---
+import type { CollectionEntry } from 'astro:content'
+import { formatDate } from '../lib'
+
+interface Props {
+  releases: CollectionEntry<'releases'>[]
+}
+const { releases } = Astro.props
+---
+
+<ol class="releases">
+  {
+    releases.map((r) => (
+      <li>
+        <span class="version" aria-hidden="true">
+          {r.data.version}
+        </span>
+        <div>
+          <h3>
+            <a href={`/releases/${r.id}/`}>{r.data.title}</a>
+          </h3>
+          <time datetime={r.data.date.toISOString().slice(0, 10)}>{formatDate(r.data.date)}</time>
+          {r.data.summary && <p>{r.data.summary}</p>}
+        </div>
+      </li>
+    ))
+  }
+</ol>
+
+<style>
+  .releases {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  li {
+    display: grid;
+    grid-template-columns: 7.5rem 1fr;
+    gap: 0 2rem;
+    padding: 1.5rem 0;
+    border-top: 1px solid var(--line);
+  }
+  li:last-child {
+    border-bottom: 1px solid var(--line);
+  }
+  .version {
+    font-family: var(--display);
+    font-size: 2.4rem;
+    line-height: 1;
+    color: var(--gold);
+  }
+  h3 {
+    font-size: 1.3rem;
+  }
+  h3 a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+  h3 a:hover {
+    color: var(--gold-bright);
+    text-decoration: underline;
+  }
+  time {
+    display: block;
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-bottom: 0.4rem;
+  }
+  p {
+    margin: 0;
+    max-width: 40rem;
+  }
+  @media (max-width: 36rem) {
+    li {
+      grid-template-columns: 1fr;
+    }
+    .version {
+      font-size: 1.8rem;
+      margin-bottom: 0.25rem;
+    }
+  }
+</style>

@@ -1,0 +1,11 @@
+---
+import Sections from '../components/Sections.astro'
+import home from '../content/pages/home.json'
+import Layout from '../layouts/Layout.astro'
+
+const startsWithHero = home.sections[0]?.type === 'hero'
+---
+
+<Layout title={home.title} overlay={startsWithHero}>
+  <Sections sections={home.sections as never} />
+</Layout>

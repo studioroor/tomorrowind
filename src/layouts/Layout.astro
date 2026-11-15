@@ -1,0 +1,319 @@
+---
+import settings from '../data/settings.json'
+
+interface Props {
+  title: string
+  description?: string
+  /** The page starts with a full-bleed image: the header floats over it. */
+  overlay?: boolean
+}
+const { title, description = settings.description, overlay = false } = Astro.props
+const pageTitle = title === settings.name ? `${title}: ${settings.tagline}` : `${title} – ${settings.name}`
+const socialImage = new URL(settings.socialImage, Astro.site ?? Astro.url).href
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>{pageTitle}</title>
+    <meta name="description" content={description} />
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={socialImage} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preload" href="/fonts/MysticCards.ttf" as="font" type="font/ttf" crossorigin />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Alegreya:ital,wght@0,400;0,500;0,700;1,400&display=swap"
+    />
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+    <header class:list={['site-header', { overlay }]}>
+      <a class="brand" href="/">{settings.name}</a>
+      <nav aria-label="Main">
+        <a href="/#install">Download</a>
+        <a href="/releases/">Releases</a>
+        <a href="/#videos">Videos</a>
+        <a href="/#support">Support</a>
+      </nav>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <p class="footer-brand">{settings.name}</p>
+        <ul>
+          <li><a href={settings.links.github}>Source on GitHub</a></li>
+          <li><a href={settings.links.issues}>Ideas and bugs</a></li>
+          <li><a href={settings.links.youtube}>YouTube</a></li>
+          <li><a href={settings.studio.url}>{settings.studio.name}</a></li>
+          <li><a href={settings.support.url}>{settings.support.label}</a></li>
+        </ul>
+        <p class="footer-note">{settings.footerNote}</p>
+      </div>
+    </footer>
+  </body>
+</html>
+
+<style is:global>
+  @font-face {
+    font-family: 'MysticCards';
+    src: url('/fonts/MysticCards.ttf') format('truetype');
+    font-display: swap;
+  }
+
+  /* Colours taken from the dusk shot: the dark ground, the Hlaalu gold of the
+     banner title, and the peach and lavender of the sky. */
+  :root {
+    --ground: #222a27;
+    --ground-2: #2c3531;
+    --ground-3: #36403b;
+    --line: #46514b;
+    --ink: #ece3d0;
+    --muted: #b3b3a2;
+    --gold: #d9b35e;
+    --gold-bright: #ecc977;
+    --peach: #e7b59b;
+    --lavender: #a7acd6;
+    --dusk-ink: #26201f;
+
+    --display: 'MysticCards', 'Palatino Linotype', Palatino, serif;
+    --body: 'Alegreya', Georgia, serif;
+    --wide: 76rem;
+    --gutter: clamp(1rem, 4vw, 2.5rem);
+
+    color-scheme: dark;
+    font-family: var(--body);
+    font-size: 112.5%;
+    line-height: 1.6;
+    color: var(--ink);
+    background: var(--ground);
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    background: var(--ground);
+    -webkit-font-smoothing: antialiased;
+  }
+  img,
+  video {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+  a {
+    color: var(--gold);
+    text-underline-offset: 0.2em;
+    text-decoration-thickness: 1px;
+  }
+  a:hover {
+    color: var(--gold-bright);
+  }
+  :focus-visible {
+    outline: 2px solid var(--gold-bright);
+    outline-offset: 3px;
+  }
+  h1,
+  h2 {
+    font-family: var(--display);
+    font-weight: 400;
+    line-height: 1.05;
+    letter-spacing: 0.01em;
+    margin: 0 0 0.5em;
+    text-wrap: balance;
+  }
+  h2 {
+    font-size: clamp(2.1rem, 4.5vw, 3.2rem);
+    color: var(--gold);
+  }
+  h3 {
+    font-size: 1.15rem;
+    line-height: 1.3;
+    margin: 0 0 0.25em;
+  }
+  p {
+    margin: 0 0 1em;
+  }
+  code {
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 0.85em;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    background: color-mix(in srgb, currentColor 12%, transparent);
+  }
+  pre {
+    overflow-x: auto;
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    background: var(--ground);
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  pre code {
+    padding: 0;
+    background: none;
+    font-size: 0.8rem;
+  }
+
+  .wrap {
+    width: min(100% - 2 * var(--gutter), var(--wide));
+    margin-inline: auto;
+  }
+  .prose {
+    max-width: 38rem;
+  }
+  .prose h2 {
+    font-size: 1.9rem;
+    margin-top: 1.5em;
+  }
+  .prose li + li {
+    margin-top: 0.4em;
+  }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6em;
+    padding: 0.75em 1.4em;
+    border-radius: 4px;
+    font-weight: 700;
+    text-decoration: none;
+    line-height: 1.2;
+    border: 2px solid var(--gold);
+    background: var(--gold);
+    color: var(--ground);
+    transition: background 150ms, border-color 150ms, color 150ms;
+  }
+  .button:hover {
+    background: var(--gold-bright);
+    border-color: var(--gold-bright);
+    color: var(--ground);
+  }
+  .button.ghost {
+    background: transparent;
+    color: var(--ink);
+    border-color: color-mix(in srgb, var(--ink) 55%, transparent);
+  }
+  .button.ghost:hover {
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+  .button small {
+    font-weight: 400;
+    opacity: 0.75;
+  }
+
+  .skip {
+    position: absolute;
+    left: -999px;
+  }
+  .skip:focus {
+    left: 1rem;
+    top: 1rem;
+    z-index: 10;
+    background: var(--gold);
+    color: var(--ground);
+    padding: 0.5rem 1rem;
+  }
+
+  .site-header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 2rem;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 1.25rem var(--gutter);
+    position: relative;
+    z-index: 2;
+  }
+  .site-header.overlay {
+    position: absolute;
+    inset: 0 0 auto;
+  }
+  .brand {
+    font-family: var(--display);
+    font-size: 1.6rem;
+    color: var(--gold);
+    text-decoration: none;
+    text-shadow: 0 1px 8px rgb(0 0 0 / 0.5);
+  }
+  .site-header nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.5rem;
+  }
+  .site-header nav a {
+    color: var(--ink);
+    text-decoration: none;
+    text-shadow: 0 1px 8px rgb(0 0 0 / 0.6);
+  }
+  .site-header nav a:hover {
+    color: var(--gold-bright);
+    text-decoration: underline;
+  }
+
+  .site-footer {
+    margin-top: 6rem;
+    border-top: 1px solid var(--line);
+    background: var(--ground);
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+  .footer-inner {
+    width: min(100% - 2 * var(--gutter), var(--wide));
+    margin-inline: auto;
+    padding: 2.5rem 0 3rem;
+    display: grid;
+    gap: 1rem 3rem;
+    grid-template-columns: auto 1fr;
+    align-items: baseline;
+  }
+  .footer-brand {
+    font-family: var(--display);
+    font-size: 1.4rem;
+    color: var(--gold);
+    margin: 0;
+  }
+  .site-footer ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1.5rem;
+  }
+  .site-footer ul a {
+    color: var(--ink);
+  }
+  .footer-note {
+    grid-column: 1 / -1;
+    max-width: 44rem;
+    margin: 0.5rem 0 0;
+  }
+  @media (max-width: 40rem) {
+    .footer-inner {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      transition: none !important;
+      animation: none !important;
+    }
+  }
+</style>

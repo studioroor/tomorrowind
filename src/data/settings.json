@@ -1,0 +1,23 @@
+{
+  "name": "Tomorrowind",
+  "tagline": "A House Hlaalu colony builder for OpenMW",
+  "description": "Found and run a House Hlaalu colony anywhere in Morrowind: settlers, jobs, trade and buildings you place wherever you like. A free mod for OpenMW 0.52 and later.",
+  "socialImage": "/images/tomorrowind-social.png",
+  "links": {
+    "github": "https://github.com/studioroor/tomorrowind",
+    "releases": "https://github.com/studioroor/tomorrowind/releases",
+    "issues": "https://github.com/studioroor/tomorrowind/issues",
+    "youtube": "https://www.youtube.com/@DrikusRoor"
+  },
+  "studio": {
+    "name": "Studio Roor",
+    "url": "https://github.com/studioroor",
+    "description": "Studio Roor is the one-person studio of Drikus Roor. By day it builds and hosts small websites for clients; Tomorrowind is what happens in the evenings."
+  },
+  "support": {
+    "url": "https://buymeacoffee.com/drikusroor",
+    "label": "Buy me a coffee",
+    "text": "Tomorrowind is free and stays free. If you enjoy your colony, a coffee keeps the evenings going."
+  },
+  "footerNote": "Tomorrowind is a fan-made mod. It needs your own copy of The Elder Scrolls III: Morrowind and isn't affiliated with or endorsed by Bethesda Softworks. The code is licensed under GPL v3."
+}

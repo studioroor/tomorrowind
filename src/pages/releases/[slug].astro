@@ -1,0 +1,112 @@
+---
+import { render } from 'astro:content'
+import YouTube from '../../components/YouTube.astro'
+import Layout from '../../layouts/Layout.astro'
+import { formatDate } from '../../lib'
+import { latestRelease, publishedReleases } from '../../releases'
+
+export async function getStaticPaths() {
+  const releases = await publishedReleases()
+  return releases.map((release, i) => ({
+    params: { slug: release.id },
+    props: { release, newer: releases[i - 1], older: releases[i + 1] },
+  }))
+}
+
+const { release, newer, older } = Astro.props
+const { Content } = await render(release)
+const latest = await latestRelease()
+const isLatest = latest?.id === release.id
+const { data } = release
+---
+
+<Layout title={data.title} description={data.summary}>
+  <article class="wrap release">
+    <header>
+      <p class="crumb"><a href="/releases/">Releases</a></p>
+      <h1>{data.title}</h1>
+      <p class="meta">
+        Version {data.version}, released <time datetime={data.date.toISOString().slice(0, 10)}>{formatDate(data.date)}</time>
+      </p>
+      {
+        data.download && (
+          <p class="get">
+            <a class="button" href={data.download}>
+              Download {data.version} <small>zip</small>
+            </a>
+            {!isLatest && latest && (
+              <span class="newer-note">
+                There's a newer version: <a href={`/releases/${latest.id}/`}>{latest.data.version}</a>.
+              </span>
+            )}
+          </p>
+        )
+      }
+    </header>
+
+    {
+      data.youtube ? (
+        <div class="media">
+          <YouTube url={data.youtube} title={`${data.title}: trailer`} large />
+        </div>
+      ) : (
+        data.cover && <img class="media" src={data.cover} alt="" />
+      )
+    }
+
+    <div class="prose">
+      <Content />
+      <p class="install-link">New to Tomorrowind? <a href="/#install">How to install it</a>.</p>
+    </div>
+
+    <nav class="pager" aria-label="Other releases">
+      {older ? <a href={`/releases/${older.id}/`}>Older: {older.data.title}</a> : <span />}
+      {newer && <a href={`/releases/${newer.id}/`}>Newer: {newer.data.title}</a>}
+    </nav>
+  </article>
+</Layout>
+
+<style>
+  .release {
+    padding-top: 3rem;
+  }
+  .crumb {
+    margin-bottom: 1.5rem;
+  }
+  h1 {
+    font-size: clamp(2.6rem, 7vw, 4.5rem);
+    color: var(--gold);
+    max-width: 52rem;
+  }
+  .meta {
+    color: var(--muted);
+  }
+  .get {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    margin: 1.5rem 0 3rem;
+  }
+  .newer-note {
+    color: var(--muted);
+  }
+  .media {
+    margin: 3rem 0;
+    max-width: 56rem;
+    border-radius: 6px;
+  }
+  .install-link {
+    margin-top: 2.5rem;
+    color: var(--muted);
+  }
+  .pager {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 1rem 2rem;
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--line);
+  }
+</style>
