@@ -1,0 +1,132 @@
+From 3cf075a2fbbfa846c2aff1907acc1114e9454f98 Mon Sep 17 00:00:00 2001
+From: Drikus Roor <drikusroor@gmail.com>
+Date: Wed, 18 Nov 2026 21:49:22 +0100
+Subject: [PATCH 3/3] OpenTW: validate terrain brush input from Lua
+
+Reject non-finite or out-of-world centres (and bad radii) in the bindings,
+where the Lua caller gets the error, and again in Terraformer before any
+float-to-int conversion of grid bounds.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ apps/openmw/mwlua/terrainbindings.cpp | 12 +++++++++---
+ apps/openmw/mwworld/terraformer.cpp   | 21 +++++++++++++--------
+ apps/openmw/mwworld/terraformer.hpp   |  3 +++
+ 3 files changed, 25 insertions(+), 11 deletions(-)
+
+diff --git a/apps/openmw/mwlua/terrainbindings.cpp b/apps/openmw/mwlua/terrainbindings.cpp
+index 81b1ac0..ff502a7 100644
+--- a/apps/openmw/mwlua/terrainbindings.cpp
++++ b/apps/openmw/mwlua/terrainbindings.cpp
+@@ -44,32 +44,38 @@ namespace MWLua
+         // Lets mods detect OpenTW: `if world.terrain then ... end`
+         api["VERSION"] = 1;
+ 
+-        api["flatten"] = [context](const osg::Vec3f& center, FiniteFloat radius, FiniteFloat height,
++        api["flatten"] = [context](const Misc::FiniteVec3f& centerArg, FiniteFloat radius, FiniteFloat height,
+                              sol::optional<FiniteFloat> falloff) {
++            const osg::Vec3f center = centerArg;
+             const float r = radius;
+             const float f = falloff ? static_cast<float>(*falloff) : r * 0.5f;
+             const float h = height;
++            MWWorld::Terraformer::checkBrush(osg::Vec2f(center.x(), center.y()), r, f);
+             queue(context, center, r + f, "terrain.flatten", [=](MWWorld::Terraformer& t) {
+                 return t.flatten(osg::Vec2f(center.x(), center.y()), r, f, h);
+             });
+         };
+ 
+-        api["raise"] = [context](const osg::Vec3f& center, FiniteFloat radius, FiniteFloat delta,
++        api["raise"] = [context](const Misc::FiniteVec3f& centerArg, FiniteFloat radius, FiniteFloat delta,
+                            sol::optional<FiniteFloat> falloff) {
++            const osg::Vec3f center = centerArg;
+             const float r = radius;
+             const float f = falloff ? static_cast<float>(*falloff) : r * 0.5f;
+             const float d = delta;
++            MWWorld::Terraformer::checkBrush(osg::Vec2f(center.x(), center.y()), r, f);
+             queue(context, center, r + f, "terrain.raise", [=](MWWorld::Terraformer& t) {
+                 return t.raise(osg::Vec2f(center.x(), center.y()), r, f, d);
+             });
+         };
+ 
+-        api["paint"] = [context](const osg::Vec3f& center, FiniteFloat radius, std::string_view texture) {
++        api["paint"] = [context](const Misc::FiniteVec3f& centerArg, FiniteFloat radius, std::string_view texture) {
+             const auto found
+                 = MWBase::Environment::get().getESMStore()->get<ESM::LandTexture>().searchIndex(texture);
+             if (!found)
+                 throw std::runtime_error("Unknown land texture: " + std::string(texture));
++            const osg::Vec3f center = centerArg;
+             const float r = radius;
++            MWWorld::Terraformer::checkBrush(osg::Vec2f(center.x(), center.y()), r, 0.f);
+             const auto [plugin, index] = *found;
+             queue(context, center, 0.f, "terrain.paint", [=](MWWorld::Terraformer& t) {
+                 return t.paint(osg::Vec2f(center.x(), center.y()), r, index, plugin);
+diff --git a/apps/openmw/mwworld/terraformer.cpp b/apps/openmw/mwworld/terraformer.cpp
+index d69582b..d6e6e56 100644
+--- a/apps/openmw/mwworld/terraformer.cpp
++++ b/apps/openmw/mwworld/terraformer.cpp
+@@ -19,6 +19,7 @@ namespace MWWorld
+         constexpr int sTexels = ESM::Land::LAND_TEXTURE_SIZE; // 16 per side
+         constexpr float sTexelSize = sCellSize / sTexels; // 512
+         constexpr float sMaxBrush = sCellSize * 4;
++        constexpr float sMaxCoordinate = 1e7f; // ~1200 cells: far beyond any map, safe to convert to int
+         constexpr int sAllData = ESM::Land::DATA_VHGT | ESM::Land::DATA_VNML | ESM::Land::DATA_VCLR
+             | ESM::Land::DATA_VTEX;
+ 
+@@ -37,12 +38,16 @@ namespace MWWorld
+             return t * t * (3.f - 2.f * t);
+         }
+ 
+-        void checkBrush(float radius, float falloff)
+-        {
+-            if (!std::isfinite(radius) || !std::isfinite(falloff) || radius < 0 || falloff < 0
+-                || radius + falloff > sMaxBrush)
+-                throw std::runtime_error("terrain brush: radius + falloff must be between 0 and 32768");
+-        }
++    }
++
++    void Terraformer::checkBrush(const osg::Vec2f& center, float radius, float falloff)
++    {
++        if (!std::isfinite(center.x()) || !std::isfinite(center.y()) || std::abs(center.x()) > sMaxCoordinate
++            || std::abs(center.y()) > sMaxCoordinate)
++            throw std::runtime_error("terrain brush: center out of range");
++        if (!std::isfinite(radius) || !std::isfinite(falloff) || radius < 0 || falloff < 0
++            || radius + falloff > sMaxBrush)
++            throw std::runtime_error("terrain brush: radius + falloff must be between 0 and 32768");
+     }
+ 
+     Terraformer::Terraformer(const ESMStore& store)
+@@ -206,7 +211,7 @@ namespace MWWorld
+     std::vector<Terraformer::CellPos> Terraformer::brush(
+         const osg::Vec2f& center, float radius, float falloff, Fn&& newHeight)
+     {
+-        checkBrush(radius, falloff);
++        checkBrush(center, radius, falloff);
+         const float reach = radius + falloff;
+         const int gx0 = static_cast<int>(std::floor((center.x() - reach) / sVertexSpacing));
+         const int gx1 = static_cast<int>(std::ceil((center.x() + reach) / sVertexSpacing));
+@@ -245,7 +250,7 @@ namespace MWWorld
+     std::vector<Terraformer::CellPos> Terraformer::paint(
+         const osg::Vec2f& center, float radius, std::uint32_t index, int plugin)
+     {
+-        checkBrush(radius, 0.f);
++        checkBrush(center, radius, 0.f);
+         const std::uint16_t value = static_cast<std::uint16_t>(index + 1);
+         const int cx0 = static_cast<int>(std::floor((center.x() - radius) / sCellSize)) - 1;
+         const int cx1 = static_cast<int>(std::floor((center.x() + radius) / sCellSize)) + 1;
+diff --git a/apps/openmw/mwworld/terraformer.hpp b/apps/openmw/mwworld/terraformer.hpp
+index 82eaeb6..3a05bfb 100644
+--- a/apps/openmw/mwworld/terraformer.hpp
++++ b/apps/openmw/mwworld/terraformer.hpp
+@@ -47,6 +47,9 @@ namespace MWWorld
+ 
+         bool hasEdits() const;
+ 
++        /// Throws std::runtime_error unless the brush is finite, sane in size, and inside the world.
++        static void checkBrush(const osg::Vec2f& center, float radius, float falloff);
++
+         /// Changes with every edit. Thread-safe.
+         std::uint64_t getRevision() const { return mRevision; }
+ 
+-- 
+2.49.0
+

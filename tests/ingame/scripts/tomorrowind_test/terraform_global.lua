@@ -49,6 +49,9 @@ return {
                     return
                 end
                 log('OpenTW terrain API version', world.terrain.VERSION)
+                check(not pcall(world.terrain.raise, v3(1e9, 0, 0), 100, 10), 'a centre far outside the world is refused')
+                check(not pcall(world.terrain.flatten, v3(0 / 0, 0, 0), 100, 10), 'a NaN centre is refused')
+                check(not pcall(world.terrain.paint, VILLAGE, 100, 'no such texture'), 'an unknown texture is refused')
                 base = v3(VILLAGE.x, VILLAGE.y, 0)
                 P.hill = base + v3(0, 2600, 0)
                 P.pond = base + v3(-2300, 1900, 0)
