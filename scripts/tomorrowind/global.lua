@@ -11,6 +11,7 @@ local C = require('scripts.tomorrowind.core.colony')
 local defs = require('scripts.tomorrowind.defs')
 local records = require('scripts.tomorrowind.records')
 local interiors = require('scripts.tomorrowind.interiors')
+local landscape = require('scripts.tomorrowind.landscape')
 
 local WORKER_SCRIPT = 'scripts/tomorrowind/worker.lua'
 local CAPTIVE_SCRIPT = 'scripts/tomorrowind/captive.lua'
@@ -49,6 +50,7 @@ local roomLeftAt = {}        -- wid -> sim time they were sent out (the move sho
 local caravanTraderId        -- object id of the trader while a caravan is here
 local workFxUntil = {}       -- sid -> sim time the smelter fire may go out
 local needsMigration = false
+local landscapeAnnounced = false -- told the player script whether the engine can terraform
 local siteTimer = 0
 local quiet = false          -- no messages (filming)
 local lastKind, lastRemark = {}, {} -- wid -> last task kind, sim time of last remark
@@ -234,6 +236,7 @@ local function pilingSpots(sid)
     local s = c.sites[sid]
     local spots = {}
     if not s.leveled or defs.buildings[s.kind].small then return spots end
+    if s.terraformed then return spots end -- OpenTW levelled the ground (applied next frame)
     local function add(p, a)
         local ground = landHeight(p)
         if ground and s.pos.z - ground > defs.slope.hiddenDepth then
@@ -1465,6 +1468,10 @@ end
 local function onUpdate(dt)
     applyGhostMove()
     roomProcessOut()
+    if not landscapeAnnounced and player() then
+        landscapeAnnounced = true
+        player():sendEvent('TMW_LandscapeEngine', landscape.available())
+    end
     if not c then return end
     if needsMigration then
         needsMigration = false
@@ -1703,6 +1710,7 @@ local function placeConfirm(e)
         { foundation = e.foundation, variant = variant, host = objs.insideHost })
     s.leveled = true -- e.pos.z is the computed floor level
     s.radius, s.half = e.radius, e.half
+    landscape.prepareSite(s) -- OpenTW: level and pave the ground
     if look.price then
         -- bought: paid from the treasury and there at once
         c.gold = C.gold(c) - look.price
@@ -1756,6 +1764,7 @@ local function debugCommand(e)
     elseif e.cmd == 'build' and c then
         local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation, variant = e.variant, host = e.host })
         s.leveled, s.radius, s.half = e.leveled, e.radius, e.half
+        if e.leveled then landscape.prepareSite(s) end
         if e.built then setSiteObject(s.id) end
         processEvents()
     elseif e.cmd == 'tp' then
@@ -2042,11 +2051,13 @@ return {
     engineHandlers = {
         onUpdate = onUpdate,
         onSave = function()
-            return { colony = c, objs = objs, recIds = recIds, ghost = ghost }
+            return { colony = c, objs = objs, recIds = recIds, ghost = ghost, terrain = landscape.save() }
         end,
         onLoad = function(data)
             data = data or {}
             c = data.colony
+            landscape.load(data.terrain)
+            landscapeAnnounced = false
             objs = data.objs or { sites = {}, workers = {}, decor = {} }
             objs.decor = objs.decor or {}
             objs.threats = objs.threats or {}
@@ -2091,6 +2102,10 @@ return {
         TMW_PlaceMove = placeMove,
         TMW_PlaceConfirm = placeConfirm,
         TMW_PlaceCancel = removeGhost,
+        TMW_Landscape = function(e)
+            local op = landscape.sanitize(e)
+            if op then landscape.apply(op) end
+        end,
         TMW_RemoveSite = removeSite,
         TMW_TradeSet = tradeSet,
         TMW_Treasury = treasury,

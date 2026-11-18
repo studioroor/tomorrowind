@@ -724,4 +724,29 @@ defs.piles = {
     food = { model = 'crate', per = 5, max = 4, layout = 'heaps' },
 }
 
+-- OpenTW only (the OpenMW fork with runtime terraforming, see docs/opentw.md).
+-- Ground under a new building is levelled to its floor and paved with a land
+-- texture from Morrowind.esm. Plain OpenMW ignores all of this.
+defs.landscape = {
+    falloff = 0.8,     -- the levelled ground blends back into the land over footprint * this
+    minFalloff = 250,
+    paintScale = 1.15, -- paved area, relative to the footprint
+    paint = {
+        default = 'AI_Dirt',
+        storehouse = 'AI_Grass_Cobbles', market = 'AI_Grass_Cobbles', warehouse = 'AI_Grass_Cobbles',
+        farm = 'AI_Tilled_Dirt',
+        house = 'AI_Dirtroad',
+    },
+    -- the landscaping tool (L)
+    brush = { radius = 400, min = 100, max = 2500, speed = 400 },
+    textures = {
+        { id = 'Sand', name = 'Sand' },
+        { id = 'AI_Grass_Cobbles', name = 'Cobblestones' },
+        { id = 'AI_Dirtroad', name = 'Dirt road' },
+        { id = 'AI_Tilled_Dirt', name = 'Tilled soil' },
+        { id = 'AI_Grass_Dirt', name = 'Grass and dirt' },
+        { id = 'AI_Grass', name = 'Grass' },
+    },
+}
+
 return defs

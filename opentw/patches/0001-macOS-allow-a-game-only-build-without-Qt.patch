@@ -1,0 +1,37 @@
+From 193405fe9e685b7bf217b447d5100e1aa443411b Mon Sep 17 00:00:00 2001
+From: Drikus Roor <drikusroor@gmail.com>
+Date: Wed, 18 Nov 2026 21:46:22 +0100
+Subject: [PATCH 1/2] macOS: allow a game-only build without Qt
+
+The Apple bundling step copied Qt plugins unconditionally, so configuring
+with BUILD_LAUNCHER/BUILD_OPENCS/BUILD_WIZARD off failed.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 3b96246..125f53d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -916,6 +916,7 @@ if (APPLE)
+         message(FATAL_ERROR "Only x86_64 OR arm64 is accepted for CMAKE_OSX_ARCHITECTURES")
+     endif()
+ 
++    if (TARGET Qt${QT_VERSION_MAJOR}::QCocoaIntegrationPlugin) # OpenTW: allow a game-only build without Qt
+     get_property(QT_COCOA_PLUGIN_PATH TARGET Qt${QT_VERSION_MAJOR}::QCocoaIntegrationPlugin PROPERTY LOCATION_RELEASE)
+     get_filename_component(QT_COCOA_PLUGIN_DIR "${QT_COCOA_PLUGIN_PATH}" DIRECTORY)
+     get_filename_component(QT_COCOA_PLUGIN_GROUP "${QT_COCOA_PLUGIN_DIR}" NAME)
+@@ -942,6 +943,8 @@ if (APPLE)
+ 
+     configure_file("${OpenMW_SOURCE_DIR}/files/mac/qt.conf" "${APP_BUNDLE_DIR}/Contents/Resources/qt.conf" COPYONLY)
+ 
++    endif ()
++
+     if (BUILD_OPENCS)
+         get_property(OPENCS_BUNDLE_NAME_TMP TARGET openmw-cs PROPERTY OUTPUT_NAME)
+         set(OPENCS_BUNDLE_NAME "${OPENCS_BUNDLE_NAME_TMP}.app")
+-- 
+2.49.0
+

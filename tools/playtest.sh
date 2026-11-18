@@ -26,6 +26,9 @@ if grep -q "^content=Tomorrowind.omwscripts" "$HOME/Library/Preferences/openmw/o
   MOD_ARGS=()
   grep -q "^content=Tomorrowind.omwaddon" "$HOME/Library/Preferences/openmw/openmw.cfg" 2>/dev/null \
     || MOD_ARGS=(--content Tomorrowind.omwaddon)
+  # FORCE_MOD_DATA=1: test this checkout (e.g. a worktree) even though the
+  # config loads the mod from elsewhere; a later data dir wins
+  [ -n "${FORCE_MOD_DATA:-}" ] && MOD_ARGS+=(--data "$ROOT")
 fi
 "$OPENMW" --config "$OUT/cfg" --user-data "$OUT/userdata" \
   ${MOD_ARGS[@]+"${MOD_ARGS[@]}"} \

@@ -1,0 +1,2 @@
+GLOBAL: scripts/tomorrowind_test/terraform_global.lua
+PLAYER: scripts/tomorrowind_test/terraform.lua

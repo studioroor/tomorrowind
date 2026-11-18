@@ -1,0 +1,1358 @@
+From f9f5930da20d10f5fb53a727d46cdc4ff83c3f04 Mon Sep 17 00:00:00 2001
+From: Drikus Roor <drikusroor@gmail.com>
+Date: Wed, 18 Nov 2026 21:46:22 +0100
+Subject: [PATCH 2/2] OpenTW: runtime terraforming (openmw.world.terrain)
+
+Global Lua scripts can now change the land of the default worldspace while
+the game runs:
+
+  world.terrain.flatten(center, radius, height[, falloff])
+  world.terrain.raise(center, radius, delta[, falloff])
+  world.terrain.paint(center, radius, landTextureIdOrFile)
+  world.terrain.reset()
+  world.terrain.VERSION
+
+- MWWorld::Terraformer keeps edited copies of LAND records. Brushes work on
+  the global vertex grid so shared edge vertices stay equal (no seams), and
+  recompute normals and min/max heights. Cells without land (open sea) can
+  be edited too, starting from the flat sea floor.
+- LandManager serves edited cells; RenderingManager/Terrain::World drop
+  cached chunks and rebuild views (quadtree and grid); Scene swaps the
+  physics and navmesh heightfields of loaded cells; actors in the area are
+  put back on the ground.
+- A painted texel may use a texture from another plugin than its land
+  record (per-texel plugin in LandData); core.land.getTextureAt sees paint.
+- Caches built from land data are only stored when the terraform revision
+  did not change during the build (background preloading races).
+- Edits are not saved: World::clear() resets them and mods replay their own
+  edits after loading, so saves stay compatible with stock OpenMW.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ apps/openmw/CMakeLists.txt                |   4 +-
+ apps/openmw/mwbase/world.hpp              |  10 +
+ apps/openmw/mwlua/landbindings.cpp        |  37 ++-
+ apps/openmw/mwlua/terrainbindings.cpp     |  85 +++++++
+ apps/openmw/mwlua/terrainbindings.hpp     |  14 ++
+ apps/openmw/mwlua/worldbindings.cpp       |   2 +
+ apps/openmw/mwrender/landmanager.cpp      |  18 +-
+ apps/openmw/mwrender/landmanager.hpp      |   6 +
+ apps/openmw/mwrender/renderingmanager.cpp |   9 +
+ apps/openmw/mwrender/renderingmanager.hpp |   3 +
+ apps/openmw/mwrender/terrainstorage.cpp   |   8 +
+ apps/openmw/mwrender/terrainstorage.hpp   |   2 +
+ apps/openmw/mwworld/scene.cpp             | 108 +++++---
+ apps/openmw/mwworld/scene.hpp             |   6 +
+ apps/openmw/mwworld/store.cpp             |  27 ++
+ apps/openmw/mwworld/store.hpp             |   5 +
+ apps/openmw/mwworld/terraformer.cpp       | 290 ++++++++++++++++++++++
+ apps/openmw/mwworld/terraformer.hpp       |  94 +++++++
+ apps/openmw/mwworld/worldimp.cpp          |  22 ++
+ apps/openmw/mwworld/worldimp.hpp          |   7 +
+ components/esm/esmterrain.cpp             |  16 ++
+ components/esm/esmterrain.hpp             |   6 +
+ components/esmterrain/storage.cpp         |   7 +-
+ components/esmterrain/storage.hpp         |   2 +
+ components/terrain/chunkmanager.cpp       |   4 +-
+ components/terrain/storage.hpp            |   5 +
+ components/terrain/terraingrid.cpp        |  13 +
+ components/terrain/terraingrid.hpp        |   2 +
+ components/terrain/world.hpp              |   9 +
+ 29 files changed, 766 insertions(+), 55 deletions(-)
+ create mode 100644 apps/openmw/mwlua/terrainbindings.cpp
+ create mode 100644 apps/openmw/mwlua/terrainbindings.hpp
+ create mode 100644 apps/openmw/mwworld/terraformer.cpp
+ create mode 100644 apps/openmw/mwworld/terraformer.hpp
+
+diff --git a/apps/openmw/CMakeLists.txt b/apps/openmw/CMakeLists.txt
+index 45f0a08..56af077 100644
+--- a/apps/openmw/CMakeLists.txt
++++ b/apps/openmw/CMakeLists.txt
+@@ -63,7 +63,7 @@ add_openmw_dir (mwlua
+     context menuscripts globalscripts localscripts playerscripts luabindings objectbindings cellbindings coremwscriptbindings
+     mwscriptbindings camerabindings vfsbindings uibindings soundbindings inputbindings nearbybindings dialoguebindings
+     postprocessingbindings stats recordstore debugbindings corebindings worldbindings worker landbindings magicbindings factionbindings
+-    classbindings itemdata inputprocessor animationbindings birthsignbindings racebindings markupbindings weatherbindings regionbindings
++    classbindings itemdata terrainbindings inputprocessor animationbindings birthsignbindings racebindings markupbindings weatherbindings regionbindings
+     types/types types/door types/item types/actor types/container types/lockable types/weapon types/npc types/bodypart
+     types/creature types/player types/activator types/book types/lockpick types/probe types/apparatus
+     types/potion types/ingredient types/misc types/repair types/armor types/light types/static
+@@ -76,7 +76,7 @@ add_openmw_dir (mwsound
+     )
+ 
+ add_openmw_dir (mwworld
+-    refdata worldimp scene globals class action nullaction actionteleport
++    refdata worldimp scene terraformer globals class action nullaction actionteleport
+     containerstore actiontalk actiontake manualref player cellvisitors failedaction
+     worldmodel localscripts customdata inventorystore ptr actionopen actionread actionharvest
+     actionequip timestamp actionalchemy cellstore actionapply actioneat
+diff --git a/apps/openmw/mwbase/world.hpp b/apps/openmw/mwbase/world.hpp
+index 3020ec2..e2ab9bf 100644
+--- a/apps/openmw/mwbase/world.hpp
++++ b/apps/openmw/mwbase/world.hpp
+@@ -103,6 +103,7 @@ namespace MWWorld
+     class DateTimeManager;
+     class Weather;
+     class WeatherStore;
++    class Terraformer;
+     struct Moon;
+ 
+     typedef std::vector<std::pair<MWWorld::Ptr, MWMechanics::Movement>> PtrMovementList;
+@@ -577,6 +578,15 @@ namespace MWBase
+         /// Return terrain height at \a worldPos position.
+         virtual float getTerrainHeightAt(const osg::Vec3f& worldPos, ESM::RefId worldspace) const = 0;
+ 
++        /// OpenTW: runtime terrain editing (default worldspace). Thread-safe.
++        virtual MWWorld::Terraformer& getTerraformer() const = 0;
++
++        /// OpenTW: after editing the land of these cells, reload rendering, collision and navmesh,
++        /// and put actors within radius of center back on the ground.
++        virtual void refreshTerrain(
++            const std::vector<std::pair<int, int>>& cells, const osg::Vec3f& center, float radius)
++            = 0;
++
+         /// Return physical or rendering half extents of the given actor.
+         virtual osg::Vec3f getHalfExtents(const MWWorld::ConstPtr& actor, bool rendering = false) const = 0;
+ 
+diff --git a/apps/openmw/mwlua/landbindings.cpp b/apps/openmw/mwlua/landbindings.cpp
+index cb110a9..c08f64c 100644
+--- a/apps/openmw/mwlua/landbindings.cpp
++++ b/apps/openmw/mwlua/landbindings.cpp
+@@ -17,6 +17,7 @@
+ #include "../mwbase/world.hpp"
+ #include "../mwworld/cellstore.hpp"
+ #include "../mwworld/esmstore.hpp"
++#include "../mwworld/terraformer.hpp"
+ #include "../mwworld/worldmodel.hpp"
+ 
+ #include "context.hpp"
+@@ -100,18 +101,30 @@ namespace MWLua
+             int cellX = static_cast<int>(std::floor(correctedPos.x() / cellSize));
+             int cellY = static_cast<int>(std::floor(correctedPos.y() / cellSize));
+ 
+-            land = landStore.search(cellX, cellY);
+-
+-            if (land != nullptr)
+-                landData = land->getLandData(ESM::Land::DATA_VTEX);
+-
+-            // If we fail to preload land data, return, we need to be able to get *any* land to know how to correct
+-            // the position used to sample terrain
+-            if (landData == nullptr)
+-                return values;
+-
+-            const ESMTerrain::UniqueTextureId textureId
+-                = getTextureAt(landData->mTextures, land->getPlugin(), correctedPos, static_cast<float>(cellSize));
++            ESMTerrain::UniqueTextureId textureId{ 0, 0 };
++
++            // OpenTW: painted texels
++            const float nX = (correctedPos.x() - cellX * cellSize) / cellSize;
++            const float nY = (correctedPos.y() - cellY * cellSize) / cellSize;
++            const auto edited = MWBase::Environment::get().getWorld()->getTerraformer().getTexture(cellX, cellY,
++                static_cast<int>(nX * ESM::Land::LAND_TEXTURE_SIZE), static_cast<int>(nY * ESM::Land::LAND_TEXTURE_SIZE));
++            if (edited)
++                textureId = *edited;
++            else
++            {
++                land = landStore.search(cellX, cellY);
++
++                if (land != nullptr)
++                    landData = land->getLandData(ESM::Land::DATA_VTEX);
++
++                // If we fail to preload land data, return, we need to be able to get *any* land to know how to
++                // correct the position used to sample terrain
++                if (landData == nullptr)
++                    return values;
++
++                textureId = getTextureAt(
++                    landData->mTextures, land->getPlugin(), correctedPos, static_cast<float>(cellSize));
++            }
+ 
+             // Need to check for 0, 0 so that we can safely subtract 1 later, as per documentation on UniqueTextureId
+             if (textureId.first == 0)
+diff --git a/apps/openmw/mwlua/terrainbindings.cpp b/apps/openmw/mwlua/terrainbindings.cpp
+new file mode 100644
+index 0000000..81b1ac0
+--- /dev/null
++++ b/apps/openmw/mwlua/terrainbindings.cpp
+@@ -0,0 +1,85 @@
++#include "terrainbindings.hpp"
++
++#include <cmath>
++#include <stdexcept>
++#include <string>
++
++#include <osg/Vec3f>
++
++#include <components/lua/luastate.hpp>
++#include <components/misc/finitevalues.hpp>
++
++#include "../mwbase/environment.hpp"
++#include "../mwbase/world.hpp"
++#include "../mwworld/esmstore.hpp"
++#include "../mwworld/terraformer.hpp"
++
++#include "context.hpp"
++#include "luamanagerimp.hpp"
++
++namespace MWLua
++{
++    namespace
++    {
++        // Edits are applied on the main thread after the Lua update, in the order they were made.
++        // reach: how far around center actors may need to be put back on the ground.
++        template <class Fn>
++        void queue(const Context& context, const osg::Vec3f& center, float reach, std::string_view name, Fn&& fn)
++        {
++            context.mLuaManager->addAction(
++                [center, reach, fn = std::forward<Fn>(fn)] {
++                    MWBase::World& world = *MWBase::Environment::get().getWorld();
++                    world.refreshTerrain(fn(world.getTerraformer()), center, reach + 256.f);
++                },
++                name);
++        }
++    }
++
++    sol::table initWorldTerrainBindings(const Context& context)
++    {
++        using Misc::FiniteFloat;
++        sol::state_view lua = context.sol();
++        sol::table api(lua, sol::create);
++
++        // Lets mods detect OpenTW: `if world.terrain then ... end`
++        api["VERSION"] = 1;
++
++        api["flatten"] = [context](const osg::Vec3f& center, FiniteFloat radius, FiniteFloat height,
++                             sol::optional<FiniteFloat> falloff) {
++            const float r = radius;
++            const float f = falloff ? static_cast<float>(*falloff) : r * 0.5f;
++            const float h = height;
++            queue(context, center, r + f, "terrain.flatten", [=](MWWorld::Terraformer& t) {
++                return t.flatten(osg::Vec2f(center.x(), center.y()), r, f, h);
++            });
++        };
++
++        api["raise"] = [context](const osg::Vec3f& center, FiniteFloat radius, FiniteFloat delta,
++                           sol::optional<FiniteFloat> falloff) {
++            const float r = radius;
++            const float f = falloff ? static_cast<float>(*falloff) : r * 0.5f;
++            const float d = delta;
++            queue(context, center, r + f, "terrain.raise", [=](MWWorld::Terraformer& t) {
++                return t.raise(osg::Vec2f(center.x(), center.y()), r, f, d);
++            });
++        };
++
++        api["paint"] = [context](const osg::Vec3f& center, FiniteFloat radius, std::string_view texture) {
++            const auto found
++                = MWBase::Environment::get().getESMStore()->get<ESM::LandTexture>().searchIndex(texture);
++            if (!found)
++                throw std::runtime_error("Unknown land texture: " + std::string(texture));
++            const float r = radius;
++            const auto [plugin, index] = *found;
++            queue(context, center, 0.f, "terrain.paint", [=](MWWorld::Terraformer& t) {
++                return t.paint(osg::Vec2f(center.x(), center.y()), r, index, plugin);
++            });
++        };
++
++        api["reset"] = [context]() {
++            queue(context, osg::Vec3f(), 0.f, "terrain.reset", [](MWWorld::Terraformer& t) { return t.reset(); });
++        };
++
++        return LuaUtil::makeReadOnly(api);
++    }
++}
+diff --git a/apps/openmw/mwlua/terrainbindings.hpp b/apps/openmw/mwlua/terrainbindings.hpp
+new file mode 100644
+index 0000000..7d8a908
+--- /dev/null
++++ b/apps/openmw/mwlua/terrainbindings.hpp
+@@ -0,0 +1,14 @@
++#ifndef OPENTW_MWLUA_TERRAINBINDINGS_H
++#define OPENTW_MWLUA_TERRAINBINDINGS_H
++
++#include <sol/forward.hpp>
++
++namespace MWLua
++{
++    struct Context;
++
++    // OpenTW: openmw.world.terrain
++    sol::table initWorldTerrainBindings(const Context& context);
++}
++
++#endif
+diff --git a/apps/openmw/mwlua/worldbindings.cpp b/apps/openmw/mwlua/worldbindings.cpp
+index 0606c5f..f5b81ff 100644
+--- a/apps/openmw/mwlua/worldbindings.cpp
++++ b/apps/openmw/mwlua/worldbindings.cpp
+@@ -40,6 +40,7 @@
+ #include "context.hpp"
+ #include "corebindings.hpp"
+ #include "mwscriptbindings.hpp"
++#include "terrainbindings.hpp"
+ 
+ namespace MWLua
+ {
+@@ -326,6 +327,7 @@ namespace MWLua
+         };
+ 
+         api["vfx"] = initWorldVfxBindings(context);
++        api["terrain"] = initWorldTerrainBindings(context); // OpenTW
+ 
+         return LuaUtil::makeReadOnly(api);
+     }
+diff --git a/apps/openmw/mwrender/landmanager.cpp b/apps/openmw/mwrender/landmanager.cpp
+index b531121..2326455 100644
+--- a/apps/openmw/mwrender/landmanager.cpp
++++ b/apps/openmw/mwrender/landmanager.cpp
+@@ -7,6 +7,9 @@
+ #include "../mwbase/environment.hpp"
+ #include "../mwbase/world.hpp"
+ #include "../mwworld/esmstore.hpp"
++#include "../mwworld/terraformer.hpp"
++
++#include <components/esm3/loadcell.hpp>
+ 
+ namespace MWRender
+ {
+@@ -32,6 +35,7 @@ namespace MWRender
+             return *cached;
+ 
+         std::shared_ptr<const ESMTerrain::LandObject> landObj = nullptr;
++        const std::uint64_t revision = world.getTerraformer().getRevision();
+ 
+         if (ESM::isEsm4Ext(cellIndex.mWorldspace))
+         {
+@@ -39,6 +43,11 @@ namespace MWRender
+             if (land != nullptr)
+                 landObj = std::make_shared<const ESMTerrain::LandObject>(*land, mLoadFlags);
+         }
++        else if (cellIndex.mWorldspace == ESM::Cell::sDefaultWorldspaceId
++            && (landObj = world.getTerraformer().makeLandObject(cellIndex.mX, cellIndex.mY)))
++        {
++            // OpenTW: edited at runtime
++        }
+         else
+         {
+             const ESM::Land* land = world.getStore().get<ESM::Land>().search(cellIndex.mX, cellIndex.mY);
+@@ -46,10 +55,17 @@ namespace MWRender
+                 landObj = std::make_shared<const ESMTerrain::LandObject>(*land, mLoadFlags);
+         }
+ 
+-        mCache->addEntryToObjectCache(cellIndex, landObj);
++        if (world.getTerraformer().getRevision() == revision) // OpenTW: else the land was edited meanwhile
++            mCache->addEntryToObjectCache(cellIndex, landObj);
+         return landObj;
+     }
+ 
++    void LandManager::invalidate(const std::vector<std::pair<int, int>>& cells)
++    {
++        for (const auto& [x, y] : cells)
++            mCache->removeFromObjectCache(ESM::ExteriorCellLocation(x, y, ESM::Cell::sDefaultWorldspaceId));
++    }
++
+     void LandManager::reportStats(unsigned int frameNumber, osg::Stats* stats) const
+     {
+         Resource::reportStats("Land", frameNumber, mCache->getStats(), *stats);
+diff --git a/apps/openmw/mwrender/landmanager.hpp b/apps/openmw/mwrender/landmanager.hpp
+index 64d0a0b..19ffcbc 100644
+--- a/apps/openmw/mwrender/landmanager.hpp
++++ b/apps/openmw/mwrender/landmanager.hpp
+@@ -3,6 +3,9 @@
+ 
+ #include <osg/Object>
+ 
++#include <utility>
++#include <vector>
++
+ #include <components/esm/exteriorcelllocation.hpp>
+ #include <components/esmterrain/storage.hpp>
+ #include <components/resource/resourcemanager.hpp>
+@@ -26,6 +29,9 @@ namespace MWRender
+ 
+         void reportStats(unsigned int frameNumber, osg::Stats* stats) const override;
+ 
++        /// OpenTW: forget these default-worldspace cells so their (edited) land is fetched again.
++        void invalidate(const std::vector<std::pair<int, int>>& cells);
++
+     private:
+         int mLoadFlags;
+     };
+diff --git a/apps/openmw/mwrender/renderingmanager.cpp b/apps/openmw/mwrender/renderingmanager.cpp
+index 882c2e4..4c509b8 100644
+--- a/apps/openmw/mwrender/renderingmanager.cpp
++++ b/apps/openmw/mwrender/renderingmanager.cpp
+@@ -1,4 +1,5 @@
+ #include "renderingmanager.hpp"
++#include "landmanager.hpp"
+ 
+ #include <cstdlib>
+ #include <sstream>
+@@ -1651,6 +1652,14 @@ namespace MWRender
+         SceneUtil::writeScene(node, filename, format);
+     }
+ 
++    void RenderingManager::refreshTerrain(const std::vector<std::pair<int, int>>& cells)
++    {
++        if (cells.empty())
++            return;
++        getLandManager()->invalidate(cells);
++        getWorldspaceChunkMgr(ESM::Cell::sDefaultWorldspaceId).mTerrain->reloadCells(cells);
++    }
++
+     LandManager* RenderingManager::getLandManager() const
+     {
+         return mTerrainStorage->getLandManager();
+diff --git a/apps/openmw/mwrender/renderingmanager.hpp b/apps/openmw/mwrender/renderingmanager.hpp
+index 2d6a4b3..4ef0bf9 100644
+--- a/apps/openmw/mwrender/renderingmanager.hpp
++++ b/apps/openmw/mwrender/renderingmanager.hpp
+@@ -271,6 +271,9 @@ namespace MWRender
+ 
+         LandManager* getLandManager() const;
+ 
++        /// OpenTW: land of these default-worldspace cells was edited; drop caches and redraw.
++        void refreshTerrain(const std::vector<std::pair<int, int>>& cells);
++
+         bool toggleBorders();
+ 
+         void updateActorPath(const MWWorld::ConstPtr& actor, const std::deque<osg::Vec3f>& path,
+diff --git a/apps/openmw/mwrender/terrainstorage.cpp b/apps/openmw/mwrender/terrainstorage.cpp
+index 1789936..01e832c 100644
+--- a/apps/openmw/mwrender/terrainstorage.cpp
++++ b/apps/openmw/mwrender/terrainstorage.cpp
+@@ -6,7 +6,9 @@
+ #include <components/esm4/loadwrld.hpp>
+ 
+ #include "../mwbase/environment.hpp"
++#include "../mwbase/world.hpp"
+ #include "../mwworld/esmstore.hpp"
++#include "../mwworld/terraformer.hpp"
+ 
+ #include "landmanager.hpp"
+ 
+@@ -30,6 +32,12 @@ namespace MWRender
+         mResourceSystem->removeResourceManager(mLandManager.get());
+     }
+ 
++    std::uint64_t TerrainStorage::getRevision() const
++    {
++        const MWBase::World* world = MWBase::Environment::get().getWorld();
++        return world ? world->getTerraformer().getRevision() : 0;
++    }
++
+     bool TerrainStorage::hasData(ESM::ExteriorCellLocation cellLocation)
+     {
+         const MWWorld::ESMStore& esmStore = *MWBase::Environment::get().getESMStore();
+diff --git a/apps/openmw/mwrender/terrainstorage.hpp b/apps/openmw/mwrender/terrainstorage.hpp
+index 4f7593a..d4c8a65 100644
+--- a/apps/openmw/mwrender/terrainstorage.hpp
++++ b/apps/openmw/mwrender/terrainstorage.hpp
+@@ -29,6 +29,8 @@ namespace MWRender
+ 
+         bool hasData(ESM::ExteriorCellLocation cellLocation) override;
+ 
++        std::uint64_t getRevision() const override;
++
+         /// Get bounds of the whole terrain in cell units
+         void getBounds(float& minX, float& maxX, float& minY, float& maxY, ESM::RefId worldspace) override;
+ 
+diff --git a/apps/openmw/mwworld/scene.cpp b/apps/openmw/mwworld/scene.cpp
+index c65dce9..9b2d24f 100644
+--- a/apps/openmw/mwworld/scene.cpp
++++ b/apps/openmw/mwworld/scene.cpp
+@@ -1,5 +1,6 @@
+ #include "scene.hpp"
+ 
++#include <algorithm>
+ #include <atomic>
+ #include <chrono>
+ #include <limits>
+@@ -426,6 +427,74 @@ namespace MWWorld
+             mRendering.notifyWorldSpaceChanged();
+     }
+ 
++    void Scene::addTerrainCollision(
++        const ESM::ExteriorCellLocation& cellIndex, const DetourNavigator::UpdateGuard* navigatorUpdateGuard)
++    {
++        using DetourNavigator::HeightfieldShape;
++        const int cellX = cellIndex.mX;
++        const int cellY = cellIndex.mY;
++        const ESM::RefId worldspace = cellIndex.mWorldspace;
++        std::shared_ptr<const ESMTerrain::LandObject> land = mRendering.getLandManager()->getLand(cellIndex);
++        const ESM::LandData* data = land ? land->getData(ESM::Land::DATA_VHGT) : nullptr;
++        const int verts = ESM::getLandSize(worldspace);
++        const int worldsize = ESM::getCellSize(worldspace);
++
++        if (data)
++        {
++            mPhysics->addHeightField(data->getHeights().data(), cellX, cellY, worldsize, verts,
++                data->getMinHeight(), data->getMaxHeight(), std::move(land));
++        }
++        else if (!ESM::isEsm4Ext(worldspace))
++        {
++            static const std::vector<float> defaultHeight(verts * verts, ESM::Land::DEFAULT_HEIGHT);
++            mPhysics->addHeightField(defaultHeight.data(), cellX, cellY, worldsize, verts,
++                ESM::Land::DEFAULT_HEIGHT, ESM::Land::DEFAULT_HEIGHT, std::move(land));
++        }
++        if (mPhysics->getHeightField(cellX, cellY))
++        {
++            const osg::Vec2i cellPosition(cellX, cellY);
++            const HeightfieldShape shape = [&]() -> HeightfieldShape {
++                if (data == nullptr)
++                {
++                    return DetourNavigator::HeightfieldPlane{ static_cast<float>(ESM::Land::DEFAULT_HEIGHT) };
++                }
++                else
++                {
++                    DetourNavigator::HeightfieldSurface heights;
++                    heights.mHeights = data->getHeights().data();
++                    heights.mSize = static_cast<std::size_t>(data->getLandSize());
++                    heights.mMinHeight = data->getMinHeight();
++                    heights.mMaxHeight = data->getMaxHeight();
++                    return heights;
++                }
++            }();
++            mNavigator.addHeightfield(cellPosition, worldsize, shape, navigatorUpdateGuard);
++        }
++    }
++
++    void Scene::reloadTerrain(const std::vector<std::pair<int, int>>& cells)
++    {
++        // OpenTW: the land of these cells was edited. Swap the collision and navmesh heightfields of the
++        // ones that are loaded. Navmesh first: it reads the heights through a pointer the physics
++        // heightfield keeps alive.
++        bool changed = false;
++        for (CellStore* cell : mActiveCells)
++        {
++            const MWWorld::Cell& c = *cell->getCell();
++            if (!c.isExterior() || c.getWorldSpace() != ESM::Cell::sDefaultWorldspaceId)
++                continue;
++            const std::pair<int, int> pos(c.getGridX(), c.getGridY());
++            if (std::find(cells.begin(), cells.end(), pos) == cells.end())
++                continue;
++            mNavigator.removeHeightfield(osg::Vec2i(pos.first, pos.second), nullptr);
++            mPhysics->removeHeightField(pos.first, pos.second);
++            addTerrainCollision(ESM::ExteriorCellLocation(pos.first, pos.second, c.getWorldSpace()), nullptr);
++            changed = true;
++        }
++        if (changed)
++            mNavigator.update(mWorld.getPlayerPtr().getRefData().getPosition().asVec3(), nullptr);
++    }
++
+     void Scene::loadCell(CellStore& cell, Loading::Listener* loadingListener, bool respawn, const osg::Vec3f& position,
+         const DetourNavigator::UpdateGuard* navigatorUpdateGuard)
+     {
+@@ -443,44 +512,7 @@ namespace MWWorld
+         ESM::ExteriorCellLocation cellIndex(cellX, cellY, worldspace);
+ 
+         if (cellVariant.isExterior())
+-        {
+-            std::shared_ptr<const ESMTerrain::LandObject> land = mRendering.getLandManager()->getLand(cellIndex);
+-            const ESM::LandData* data = land ? land->getData(ESM::Land::DATA_VHGT) : nullptr;
+-            const int verts = ESM::getLandSize(worldspace);
+-            const int worldsize = ESM::getCellSize(worldspace);
+-
+-            if (data)
+-            {
+-                mPhysics->addHeightField(data->getHeights().data(), cellX, cellY, worldsize, verts,
+-                    data->getMinHeight(), data->getMaxHeight(), std::move(land));
+-            }
+-            else if (!ESM::isEsm4Ext(worldspace))
+-            {
+-                static const std::vector<float> defaultHeight(verts * verts, ESM::Land::DEFAULT_HEIGHT);
+-                mPhysics->addHeightField(defaultHeight.data(), cellX, cellY, worldsize, verts,
+-                    ESM::Land::DEFAULT_HEIGHT, ESM::Land::DEFAULT_HEIGHT, std::move(land));
+-            }
+-            if (mPhysics->getHeightField(cellX, cellY))
+-            {
+-                const osg::Vec2i cellPosition(cellX, cellY);
+-                const HeightfieldShape shape = [&]() -> HeightfieldShape {
+-                    if (data == nullptr)
+-                    {
+-                        return DetourNavigator::HeightfieldPlane{ static_cast<float>(ESM::Land::DEFAULT_HEIGHT) };
+-                    }
+-                    else
+-                    {
+-                        DetourNavigator::HeightfieldSurface heights;
+-                        heights.mHeights = data->getHeights().data();
+-                        heights.mSize = static_cast<std::size_t>(data->getLandSize());
+-                        heights.mMinHeight = data->getMinHeight();
+-                        heights.mMaxHeight = data->getMaxHeight();
+-                        return heights;
+-                    }
+-                }();
+-                mNavigator.addHeightfield(cellPosition, worldsize, shape, navigatorUpdateGuard);
+-            }
+-        }
++            addTerrainCollision(cellIndex, navigatorUpdateGuard);
+ 
+         ESM::visit(ESM::VisitOverload{
+                        [&](const ESM::Cell& c) {
+diff --git a/apps/openmw/mwworld/scene.hpp b/apps/openmw/mwworld/scene.hpp
+index 6e25c32..b406f54 100644
+--- a/apps/openmw/mwworld/scene.hpp
++++ b/apps/openmw/mwworld/scene.hpp
+@@ -143,7 +143,13 @@ namespace MWWorld
+         void loadCell(CellStore& cell, Loading::Listener* loadingListener, bool respawn, const osg::Vec3f& position,
+             const DetourNavigator::UpdateGuard* navigatorUpdateGuard);
+ 
++        void addTerrainCollision(
++            const ESM::ExteriorCellLocation& cellIndex, const DetourNavigator::UpdateGuard* navigatorUpdateGuard);
++
+     public:
++        /// OpenTW: rebuild collision and navmesh of the loaded cells among these (edited land).
++        void reloadTerrain(const std::vector<std::pair<int, int>>& cells);
++
+         Scene(MWWorld::World& world, MWRender::RenderingManager& rendering, MWPhysics::PhysicsSystem* physics,
+             DetourNavigator::Navigator& navigator);
+ 
+diff --git a/apps/openmw/mwworld/store.cpp b/apps/openmw/mwworld/store.cpp
+index aca5375..4986369 100644
+--- a/apps/openmw/mwworld/store.cpp
++++ b/apps/openmw/mwworld/store.cpp
+@@ -384,6 +384,33 @@ namespace MWWorld
+         return &texture->second;
+     }
+ 
++    std::optional<std::pair<int, std::uint32_t>> Store<ESM::LandTexture>::searchIndex(
++        std::string_view idOrTexture) const
++    {
++        // "textures\tx_sand.dds" -> "tx_sand"
++        const auto stem = [](std::string_view s) {
++            const std::size_t slash = s.find_last_of("/\\");
++            if (slash != std::string_view::npos)
++                s = s.substr(slash + 1);
++            const std::size_t dot = s.find_last_of('.');
++            if (dot != std::string_view::npos)
++                s = s.substr(0, dot);
++            return s;
++        };
++        const ESM::RefId id = ESM::RefId::stringRefId(idOrTexture);
++        for (const auto& [pluginIndex, ltexId] : mMappings)
++            if (ltexId == id)
++                return pluginIndex;
++        const std::string_view wanted = stem(idOrTexture);
++        for (const auto& [pluginIndex, ltexId] : mMappings)
++        {
++            const auto texture = mStatic.find(ltexId);
++            if (texture != mStatic.end() && Misc::StringUtils::ciEqual(stem(texture->second.getOriginal()), wanted))
++                return pluginIndex;
++        }
++        return std::nullopt;
++    }
++
+     size_t Store<ESM::LandTexture>::getSize() const
+     {
+         return mStatic.size();
+diff --git a/apps/openmw/mwworld/store.hpp b/apps/openmw/mwworld/store.hpp
+index 00a22d1..775ba79 100644
+--- a/apps/openmw/mwworld/store.hpp
++++ b/apps/openmw/mwworld/store.hpp
+@@ -2,6 +2,7 @@
+ #define OPENMW_MWWORLD_STORE_H
+ 
+ #include <map>
++#include <optional>
+ #include <set>
+ #include <span>
+ #include <string>
+@@ -265,6 +266,10 @@ namespace MWWorld
+         // Not a big deal here, since ESM::LandTexture can never be modified or inserted/erased
+         const ESM::Path* search(std::uint32_t index, int plugin) const;
+ 
++        // OpenTW: find a land texture by record id or by texture file name (with or without "textures/",
++        // any extension). Returns {plugin, index}.
++        std::optional<std::pair<int, std::uint32_t>> searchIndex(std::string_view idOrTexture) const;
++
+         size_t getSize() const override;
+         bool eraseStatic(const ESM::RefId& id) override;
+ 
+diff --git a/apps/openmw/mwworld/terraformer.cpp b/apps/openmw/mwworld/terraformer.cpp
+new file mode 100644
+index 0000000..d69582b
+--- /dev/null
++++ b/apps/openmw/mwworld/terraformer.cpp
+@@ -0,0 +1,290 @@
++#include "terraformer.hpp"
++
++#include <algorithm>
++#include <cmath>
++#include <stdexcept>
++
++#include <components/esm3/loadland.hpp>
++#include <components/esmterrain/storage.hpp>
++
++#include "esmstore.hpp"
++
++namespace MWWorld
++{
++    namespace
++    {
++        constexpr int sCellVerts = ESM::Land::LAND_SIZE - 1; // 64 vertex steps per cell
++        constexpr float sCellSize = static_cast<float>(ESM::Land::REAL_SIZE);
++        constexpr float sVertexSpacing = sCellSize / sCellVerts; // 128
++        constexpr int sTexels = ESM::Land::LAND_TEXTURE_SIZE; // 16 per side
++        constexpr float sTexelSize = sCellSize / sTexels; // 512
++        constexpr float sMaxBrush = sCellSize * 4;
++        constexpr int sAllData = ESM::Land::DATA_VHGT | ESM::Land::DATA_VNML | ESM::Land::DATA_VCLR
++            | ESM::Land::DATA_VTEX;
++
++        int floorDiv(int a, int b)
++        {
++            return a >= 0 ? a / b : -((-a + b - 1) / b);
++        }
++
++        float weight(float distance, float radius, float falloff)
++        {
++            if (distance <= radius)
++                return 1.f;
++            if (falloff <= 0.f || distance >= radius + falloff)
++                return 0.f;
++            const float t = 1.f - (distance - radius) / falloff;
++            return t * t * (3.f - 2.f * t);
++        }
++
++        void checkBrush(float radius, float falloff)
++        {
++            if (!std::isfinite(radius) || !std::isfinite(falloff) || radius < 0 || falloff < 0
++                || radius + falloff > sMaxBrush)
++                throw std::runtime_error("terrain brush: radius + falloff must be between 0 and 32768");
++        }
++    }
++
++    Terraformer::Terraformer(const ESMStore& store)
++        : mStore(store)
++    {
++    }
++
++    Terraformer::~Terraformer() = default;
++
++    std::shared_ptr<const ESMTerrain::LandObject> Terraformer::makeLandObject(int cellX, int cellY) const
++    {
++        const std::lock_guard lock(mMutex);
++        const auto it = mEdits.find({ cellX, cellY });
++        if (it == mEdits.end())
++            return nullptr;
++        return std::make_shared<const ESMTerrain::LandObject>(
++            it->second.mData, it->second.mPlugin, it->second.mTexturePlugins);
++    }
++
++    std::optional<std::pair<std::uint16_t, int>> Terraformer::getTexture(int cellX, int cellY, int tx, int ty) const
++    {
++        const std::lock_guard lock(mMutex);
++        const auto it = mEdits.find({ cellX, cellY });
++        if (it == mEdits.end() || tx < 0 || ty < 0 || tx >= sTexels || ty >= sTexels)
++            return std::nullopt;
++        const std::size_t i = static_cast<std::size_t>(ty * sTexels + tx);
++        return std::make_pair(it->second.mData.mTextures[i], it->second.mTexturePlugins[i]);
++    }
++
++    bool Terraformer::hasEdits() const
++    {
++        const std::lock_guard lock(mMutex);
++        return !mEdits.empty();
++    }
++
++    const Terraformer::Cell& Terraformer::source(CellPos pos)
++    {
++        if (const auto it = mEdits.find(pos); it != mEdits.end())
++            return it->second;
++        if (const auto it = mOriginals.find(pos); it != mOriginals.end())
++            return it->second;
++
++        Cell& cell = mOriginals[pos];
++        cell.mData.mDataLoaded = 0;
++        if (const ESM::Land* land = mStore.get<ESM::Land>().search(pos.first, pos.second))
++        {
++            land->loadData(sAllData, cell.mData);
++            cell.mPlugin = land->getPlugin();
++        }
++        // Cells without land (open sea) start as the flat sea floor the engine shows there anyway
++        ESM::LandRecordData& d = cell.mData;
++        if (!(d.mDataLoaded & ESM::Land::DATA_VHGT))
++        {
++            d.mHeights.fill(static_cast<float>(ESM::Land::DEFAULT_HEIGHT));
++            d.mMinHeight = d.mMaxHeight = static_cast<float>(ESM::Land::DEFAULT_HEIGHT);
++        }
++        if (!(d.mDataLoaded & ESM::Land::DATA_VNML))
++            for (std::size_t i = 0; i < d.mNormals.size(); i += 3)
++            {
++                d.mNormals[i] = 0;
++                d.mNormals[i + 1] = 0;
++                d.mNormals[i + 2] = 127;
++            }
++        if (!(d.mDataLoaded & ESM::Land::DATA_VCLR))
++            d.mColours.fill(255);
++        if (!(d.mDataLoaded & ESM::Land::DATA_VTEX))
++            d.mTextures.fill(0);
++        d.mDataLoaded = sAllData;
++        cell.mTexturePlugins.assign(ESM::Land::LAND_NUM_TEXTURES, cell.mPlugin);
++        return cell;
++    }
++
++    Terraformer::Cell& Terraformer::edit(CellPos pos, Changed& changed)
++    {
++        changed[pos] = true;
++        if (const auto it = mEdits.find(pos); it != mEdits.end())
++            return it->second;
++        const Cell copy = source(pos);
++        return mEdits.emplace(pos, copy).first->second;
++    }
++
++    float Terraformer::height(int gx, int gy)
++    {
++        const int cx = floorDiv(gx, sCellVerts);
++        const int cy = floorDiv(gy, sCellVerts);
++        const int lx = gx - cx * sCellVerts;
++        const int ly = gy - cy * sCellVerts;
++        return source({ cx, cy }).mData.mHeights[ly * ESM::Land::LAND_SIZE + lx];
++    }
++
++    // A vertex on a cell edge is stored in every cell that touches it (up to four). fn(cell, vertexIndex).
++    template <class Fn>
++    void Terraformer::forEachCopy(int gx, int gy, Fn&& fn)
++    {
++        const int cx = floorDiv(gx, sCellVerts);
++        const int cy = floorDiv(gy, sCellVerts);
++        const int lx = gx - cx * sCellVerts;
++        const int ly = gy - cy * sCellVerts;
++        const int nx = lx == 0 ? 2 : 1;
++        const int ny = ly == 0 ? 2 : 1;
++        for (int ix = 0; ix < nx; ++ix)
++            for (int iy = 0; iy < ny; ++iy)
++            {
++                const int cellX = cx - ix;
++                const int cellY = cy - iy;
++                const int vx = ix ? sCellVerts : lx;
++                const int vy = iy ? sCellVerts : ly;
++                fn(CellPos{ cellX, cellY }, vy * ESM::Land::LAND_SIZE + vx);
++            }
++    }
++
++    void Terraformer::setHeight(int gx, int gy, float h, Changed& changed)
++    {
++        forEachCopy(gx, gy, [&](CellPos pos, int i) {
++            if (std::abs(source(pos).mData.mHeights[i] - h) < 0.01f)
++                return;
++            edit(pos, changed).mData.mHeights[i] = h;
++        });
++    }
++
++    void Terraformer::updateNormals(int gx0, int gy0, int gx1, int gy1, Changed& changed)
++    {
++        for (int gy = gy0; gy <= gy1; ++gy)
++            for (int gx = gx0; gx <= gx1; ++gx)
++            {
++                osg::Vec3f n(height(gx - 1, gy) - height(gx + 1, gy), height(gx, gy - 1) - height(gx, gy + 1),
++                    2.f * sVertexSpacing);
++                n.normalize();
++                const std::int8_t nx = static_cast<std::int8_t>(std::lround(n.x() * 127.f));
++                const std::int8_t ny = static_cast<std::int8_t>(std::lround(n.y() * 127.f));
++                const std::int8_t nz = static_cast<std::int8_t>(std::lround(n.z() * 127.f));
++                forEachCopy(gx, gy, [&](CellPos pos, int i) {
++                    const auto& normals = source(pos).mData.mNormals;
++                    if (normals[i * 3] == nx && normals[i * 3 + 1] == ny && normals[i * 3 + 2] == nz)
++                        return;
++                    auto& out = edit(pos, changed).mData.mNormals;
++                    out[i * 3] = nx;
++                    out[i * 3 + 1] = ny;
++                    out[i * 3 + 2] = nz;
++                });
++            }
++    }
++
++    std::vector<Terraformer::CellPos> Terraformer::finish(Changed& changed)
++    {
++        std::vector<CellPos> result;
++        for (const auto& [pos, _] : changed)
++        {
++            ESM::LandRecordData& d = mEdits.at(pos).mData;
++            const auto [lo, hi] = std::minmax_element(d.mHeights.begin(), d.mHeights.end());
++            d.mMinHeight = *lo;
++            d.mMaxHeight = *hi;
++            result.push_back(pos);
++        }
++        if (!result.empty())
++            ++mRevision;
++        return result;
++    }
++
++    template <class Fn>
++    std::vector<Terraformer::CellPos> Terraformer::brush(
++        const osg::Vec2f& center, float radius, float falloff, Fn&& newHeight)
++    {
++        checkBrush(radius, falloff);
++        const float reach = radius + falloff;
++        const int gx0 = static_cast<int>(std::floor((center.x() - reach) / sVertexSpacing));
++        const int gx1 = static_cast<int>(std::ceil((center.x() + reach) / sVertexSpacing));
++        const int gy0 = static_cast<int>(std::floor((center.y() - reach) / sVertexSpacing));
++        const int gy1 = static_cast<int>(std::ceil((center.y() + reach) / sVertexSpacing));
++
++        const std::lock_guard lock(mMutex);
++        Changed changed;
++        for (int gy = gy0; gy <= gy1; ++gy)
++            for (int gx = gx0; gx <= gx1; ++gx)
++            {
++                const osg::Vec2f p(gx * sVertexSpacing, gy * sVertexSpacing);
++                const float w = weight((p - center).length(), radius, falloff);
++                if (w <= 0.f)
++                    continue;
++                const float h = height(gx, gy);
++                setHeight(gx, gy, h + (newHeight(h) - h) * w, changed);
++            }
++        if (!changed.empty())
++            updateNormals(gx0 - 1, gy0 - 1, gx1 + 1, gy1 + 1, changed);
++        return finish(changed);
++    }
++
++    std::vector<Terraformer::CellPos> Terraformer::flatten(
++        const osg::Vec2f& center, float radius, float falloff, float height)
++    {
++        return brush(center, radius, falloff, [&](float) { return height; });
++    }
++
++    std::vector<Terraformer::CellPos> Terraformer::raise(
++        const osg::Vec2f& center, float radius, float falloff, float delta)
++    {
++        return brush(center, radius, falloff, [&](float h) { return h + delta; });
++    }
++
++    std::vector<Terraformer::CellPos> Terraformer::paint(
++        const osg::Vec2f& center, float radius, std::uint32_t index, int plugin)
++    {
++        checkBrush(radius, 0.f);
++        const std::uint16_t value = static_cast<std::uint16_t>(index + 1);
++        const int cx0 = static_cast<int>(std::floor((center.x() - radius) / sCellSize)) - 1;
++        const int cx1 = static_cast<int>(std::floor((center.x() + radius) / sCellSize)) + 1;
++        const int cy0 = static_cast<int>(std::floor((center.y() - radius) / sCellSize)) - 1;
++        const int cy1 = static_cast<int>(std::floor((center.y() + radius) / sCellSize)) + 1;
++
++        const std::lock_guard lock(mMutex);
++        Changed changed;
++        for (int cy = cy0; cy <= cy1; ++cy)
++            for (int cx = cx0; cx <= cx1; ++cx)
++                for (int ty = 0; ty < sTexels; ++ty)
++                    for (int tx = 0; tx < sTexels; ++tx)
++                    {
++                        // Texels are drawn a quarter texel off their grid square (see core.land.getTextureAt)
++                        const osg::Vec2f p(cx * sCellSize + (tx + 0.75f) * sTexelSize,
++                            cy * sCellSize + (ty + 0.25f) * sTexelSize);
++                        if ((p - center).length() > radius)
++                            continue;
++                        const std::size_t i = static_cast<std::size_t>(ty * sTexels + tx);
++                        const Cell& src = source({ cx, cy });
++                        if (src.mData.mTextures[i] == value && src.mTexturePlugins[i] == plugin)
++                            continue;
++                        Cell& cell = edit({ cx, cy }, changed);
++                        cell.mData.mTextures[i] = value;
++                        cell.mTexturePlugins[i] = plugin;
++                    }
++        return finish(changed);
++    }
++
++    std::vector<Terraformer::CellPos> Terraformer::reset()
++    {
++        const std::lock_guard lock(mMutex);
++        std::vector<CellPos> result;
++        for (const auto& [pos, _] : mEdits)
++            result.push_back(pos);
++        mEdits.clear();
++        mOriginals.clear();
++        if (!result.empty())
++            ++mRevision;
++        return result;
++    }
++}
+diff --git a/apps/openmw/mwworld/terraformer.hpp b/apps/openmw/mwworld/terraformer.hpp
+new file mode 100644
+index 0000000..82eaeb6
+--- /dev/null
++++ b/apps/openmw/mwworld/terraformer.hpp
+@@ -0,0 +1,94 @@
++#ifndef OPENTW_MWWORLD_TERRAFORMER_H
++#define OPENTW_MWWORLD_TERRAFORMER_H
++
++#include <atomic>
++#include <cstdint>
++#include <map>
++#include <memory>
++#include <mutex>
++#include <optional>
++#include <utility>
++#include <vector>
++
++#include <osg/Vec2f>
++
++#include <components/esm3/landrecorddata.hpp>
++
++namespace ESMTerrain
++{
++    class LandObject;
++}
++
++namespace MWWorld
++{
++    class ESMStore;
++
++    /// OpenTW: runtime terrain editing for the default (Morrowind) worldspace.
++    ///
++    /// Keeps an edited copy of every land record that was changed. The renderer, physics and navmesh pick
++    /// these copies up through MWRender::LandManager; World::refreshTerrain() tells them to reload.
++    /// Edits are not written to saved games: the caller (a Lua mod) owns them and re-applies them on load.
++    ///
++    /// Brushes work on the global vertex grid (128 units between vertices, 64 per cell), so the vertices
++    /// two neighbouring cells share always stay equal and no seams open up.
++    class Terraformer
++    {
++    public:
++        using CellPos = std::pair<int, int>;
++
++        explicit Terraformer(const ESMStore& store);
++        ~Terraformer();
++
++        /// Thread-safe (terrain is built on background threads). nullptr when the cell has no edits.
++        std::shared_ptr<const ESMTerrain::LandObject> makeLandObject(int cellX, int cellY) const;
++
++        /// Texture of a texel of an edited cell: {VTEX value (LTEX index + 1, 0 = default), plugin}.
++        std::optional<std::pair<std::uint16_t, int>> getTexture(int cellX, int cellY, int tx, int ty) const;
++
++        bool hasEdits() const;
++
++        /// Changes with every edit. Thread-safe.
++        std::uint64_t getRevision() const { return mRevision; }
++
++        // Brushes, in world units. Full effect within radius, fading out (smoothstep) over falloff.
++        // Each returns the cells whose land data changed.
++
++        /// Pull the ground towards height.
++        std::vector<CellPos> flatten(const osg::Vec2f& center, float radius, float falloff, float height);
++        /// Raise (or, with a negative delta, lower) the ground.
++        std::vector<CellPos> raise(const osg::Vec2f& center, float radius, float falloff, float delta);
++        /// Paint every texel whose centre is within radius. index is the LTEX index (not +1).
++        std::vector<CellPos> paint(const osg::Vec2f& center, float radius, std::uint32_t index, int plugin);
++        /// Undo all edits.
++        std::vector<CellPos> reset();
++
++    private:
++        struct Cell
++        {
++            ESM::LandRecordData mData;
++            std::vector<int> mTexturePlugins;
++            int mPlugin = 0;
++        };
++
++        using Changed = std::map<CellPos, bool>;
++
++        const Cell& source(CellPos pos);
++        Cell& edit(CellPos pos, Changed& changed);
++        float height(int gx, int gy);
++        template <class Fn>
++        void forEachCopy(int gx, int gy, Fn&& fn);
++        void setHeight(int gx, int gy, float h, Changed& changed);
++        void updateNormals(int gx0, int gy0, int gx1, int gy1, Changed& changed);
++        std::vector<CellPos> finish(Changed& changed);
++        template <class Fn>
++        std::vector<CellPos> brush(const osg::Vec2f& center, float radius, float falloff, Fn&& newHeight);
++
++        const ESMStore& mStore;
++        mutable std::mutex mMutex;
++        std::atomic<std::uint64_t> mRevision{ 0 };
++        std::map<CellPos, Cell> mEdits;
++        std::map<CellPos, Cell> mOriginals; // unedited land, loaded once
++    };
++}
++
++#endif
+diff --git a/apps/openmw/mwworld/worldimp.cpp b/apps/openmw/mwworld/worldimp.cpp
+index 807dd31..72ffc30 100644
+--- a/apps/openmw/mwworld/worldimp.cpp
++++ b/apps/openmw/mwworld/worldimp.cpp
+@@ -1,5 +1,6 @@
+ #include "worldimp.hpp"
+ 
++#include <algorithm>
+ #include <charconv>
+ #include <vector>
+ 
+@@ -269,6 +270,7 @@ namespace MWWorld
+         mRendering->preloadCommonAssets(*mWeatherStore.get());
+ 
+         mWorldScene = std::make_unique<Scene>(*this, *mRendering.get(), mPhysics.get(), *mNavigator);
++        mTerraformer = std::make_unique<Terraformer>(mStore);
+     }
+ 
+     void World::fillGlobalVariables()
+@@ -367,6 +369,8 @@ namespace MWWorld
+ 
+     void World::clear()
+     {
++        // OpenTW: terrain edits belong to the session; mods re-apply theirs after loading
++        mRendering->refreshTerrain(mTerraformer->reset());
+         mWeatherManager->clear();
+         mRendering->clear();
+         mProjectileManager->clear();
+@@ -3593,6 +3597,24 @@ namespace MWWorld
+         return mRendering->getTerrainHeightAt(worldPos, worldspace);
+     }
+ 
++    void World::refreshTerrain(const std::vector<std::pair<int, int>>& cells, const osg::Vec3f& center, float radius)
++    {
++        if (cells.empty())
++            return;
++        mRendering->refreshTerrain(cells);
++        mWorldScene->reloadTerrain(cells);
++
++        std::vector<Ptr> actors;
++        MWBase::Environment::get().getMechanicsManager()->getActorsInRange(center, radius, actors);
++        const Ptr player = getPlayerPtr();
++        if (std::find(actors.begin(), actors.end(), player) == actors.end()
++            && (player.getRefData().getPosition().asVec3() - center).length2() <= radius * radius)
++            actors.push_back(player);
++        for (const Ptr& actor : actors)
++            if (actor.isInCell() && actor.getCell()->isExterior())
++                adjustPosition(actor, false);
++    }
++
+     osg::Vec3f World::getHalfExtents(const ConstPtr& object, bool rendering) const
+     {
+         if (!object.getClass().isActor())
+diff --git a/apps/openmw/mwworld/worldimp.hpp b/apps/openmw/mwworld/worldimp.hpp
+index 679e2b9..e1c0a2b 100644
+--- a/apps/openmw/mwworld/worldimp.hpp
++++ b/apps/openmw/mwworld/worldimp.hpp
+@@ -22,6 +22,7 @@
+ #include "localscripts.hpp"
+ #include "ptr.hpp"
+ #include "scene.hpp"
++#include "terraformer.hpp"
+ #include "timestamp.hpp"
+ #include "worldmodel.hpp"
+ 
+@@ -105,6 +106,7 @@ namespace MWWorld
+         std::unique_ptr<DetourNavigator::Navigator> mNavigator;
+         std::unique_ptr<MWRender::RenderingManager> mRendering;
+         std::unique_ptr<MWWorld::Scene> mWorldScene;
++        std::unique_ptr<MWWorld::Terraformer> mTerraformer;
+         std::unique_ptr<MWWorld::WeatherStore> mWeatherStore;
+         std::unique_ptr<MWWorld::WeatherManager> mWeatherManager;
+         std::unique_ptr<MWWorld::DateTimeManager> mTimeManager;
+@@ -645,6 +647,11 @@ namespace MWWorld
+         /// Return terrain height at \a worldPos position.
+         float getTerrainHeightAt(const osg::Vec3f& worldPos, ESM::RefId worldspace) const override;
+ 
++        MWWorld::Terraformer& getTerraformer() const override { return *mTerraformer; }
++
++        void refreshTerrain(
++            const std::vector<std::pair<int, int>>& cells, const osg::Vec3f& center, float radius) override;
++
+         /// Return physical or rendering half extents of the given actor.
+         osg::Vec3f getHalfExtents(const MWWorld::ConstPtr& actor, bool rendering = false) const override;
+ 
+diff --git a/components/esm/esmterrain.cpp b/components/esm/esmterrain.cpp
+index 1330418..6c72143 100644
+--- a/components/esm/esmterrain.cpp
++++ b/components/esm/esmterrain.cpp
+@@ -36,6 +36,22 @@ ESM::LandData::LandData(const ESM::Land& land, int loadFlags)
+ {
+ }
+ 
++ESM::LandData::LandData(const ESM::LandRecordData& data, int plugin, std::vector<int> texturePlugins)
++    : mData(std::make_unique<const ESM::LandRecordData>(data))
++    , mHeights(mData->mHeights)
++    , mNormals(mData->mNormals)
++    , mColors(mData->mColours)
++    , mTextures(mData->mTextures)
++    , mTexturePlugins(std::move(texturePlugins))
++    , mLoadFlags(mData->mDataLoaded)
++    , mMinHeight(mData->mMinHeight)
++    , mMaxHeight(mData->mMaxHeight)
++    , mSize(Constants::CellSizeInUnits)
++    , mLandSize(ESM::Land::LAND_SIZE)
++    , mPlugin(plugin)
++{
++}
++
+ ESM::LandData::LandData(const ESM4::Land& land, int /*loadFlags*/)
+     : mHeightsData(ESM4::Land::sLandNumVerts)
+     , mNormals(land.mVertNorm)
+diff --git a/components/esm/esmterrain.hpp b/components/esm/esmterrain.hpp
+index c64aac2..1fc0275 100644
+--- a/components/esm/esmterrain.hpp
++++ b/components/esm/esmterrain.hpp
+@@ -20,6 +20,9 @@ namespace ESM
+         LandData();
+         explicit LandData(const ESM::Land& land, int loadFlags);
+         explicit LandData(const ESM4::Land& land, int loadFlags);
++        // OpenTW: from a runtime-edited copy of a land record. texturePlugins (empty, or one per texel)
++        // lets a painted texel use a texture from a different plugin than the land record itself.
++        LandData(const ESM::LandRecordData& data, int plugin, std::vector<int> texturePlugins);
+ 
+         ~LandData();
+ 
+@@ -32,6 +35,8 @@ namespace ESM
+         int getLandSize() const { return mLandSize; }
+         int getLoadFlags() const { return mLoadFlags; }
+         int getPlugin() const { return mPlugin; }
++        // Plugin to resolve the texture index of texel i against
++        int getTexturePlugin(std::size_t i) const { return mTexturePlugins.empty() ? mPlugin : mTexturePlugins[i]; }
+ 
+         bool isEsm4() const { return mIsEsm4; }
+ 
+@@ -57,6 +62,7 @@ namespace ESM
+         std::span<const std::uint8_t> mColors;
+         std::span<const std::uint16_t> mTextures;
+         std::array<ESM4::Land::Texture, 4> mEsm4Textures;
++        std::vector<int> mTexturePlugins;
+         int mLoadFlags = 0;
+         float mMinHeight = 0.f;
+         float mMaxHeight = 0.f;
+diff --git a/components/esmterrain/storage.cpp b/components/esmterrain/storage.cpp
+index f5566fb..40d96b5 100644
+--- a/components/esmterrain/storage.cpp
++++ b/components/esmterrain/storage.cpp
+@@ -41,7 +41,7 @@ namespace ESMTerrain
+             if (tex == 0)
+                 return { 0, 0 }; // vtex 0 is always the base texture, regardless of plugin
+ 
+-            return { tex, land->getPlugin() };
++            return { tex, data->getTexturePlugin(y * ESM::Land::LAND_TEXTURE_SIZE + x) };
+         }
+     }
+ 
+@@ -101,6 +101,11 @@ namespace ESMTerrain
+     {
+     }
+ 
++    LandObject::LandObject(const ESM::LandRecordData& data, int plugin, std::vector<int> texturePlugins)
++        : mData(data, plugin, std::move(texturePlugins))
++    {
++    }
++
+     const float defaultHeight = ESM::Land::DEFAULT_HEIGHT;
+ 
+     Storage::Storage(const VFS::Manager* vfs, std::string_view normalMapPattern,
+diff --git a/components/esmterrain/storage.hpp b/components/esmterrain/storage.hpp
+index 17b4f04..c0b56b1 100644
+--- a/components/esmterrain/storage.hpp
++++ b/components/esmterrain/storage.hpp
+@@ -45,6 +45,8 @@ namespace ESMTerrain
+         LandObject() = default;
+         LandObject(const ESM::Land& land, int loadFlags);
+         LandObject(const ESM4::Land& land, int loadFlags);
++        // OpenTW: wraps a runtime-edited land record
++        LandObject(const ESM::LandRecordData& data, int plugin, std::vector<int> texturePlugins);
+ 
+         const ESM::LandData* getData(int flags) const
+         {
+diff --git a/components/terrain/chunkmanager.cpp b/components/terrain/chunkmanager.cpp
+index ee4daa1..4d6490b 100644
+--- a/components/terrain/chunkmanager.cpp
++++ b/components/terrain/chunkmanager.cpp
+@@ -66,6 +66,7 @@ namespace Terrain
+         lod = static_cast<unsigned char>(lodFlags >> (4 * 4));
+ 
+         const ChunkKey key{ .mCenter = center, .mLod = lod, .mLodFlags = lodFlags };
++        const std::uint64_t revision = mStorage->getRevision();
+         if (osg::ref_ptr<osg::Object> obj = mCache->getRefFromObjectCache(key))
+             return static_cast<osg::Node*>(obj.get());
+ 
+@@ -76,7 +77,8 @@ namespace Terrain
+             templateGeometry = static_cast<const TerrainDrawable*>(pair->second.get());
+ 
+         osg::ref_ptr<osg::Node> node = createChunk(size, center, lod, lodFlags, compile, templateGeometry);
+-        mCache->addEntryToObjectCache(key, node.get());
++        if (mStorage->getRevision() == revision) // OpenTW: else the land was edited meanwhile
++            mCache->addEntryToObjectCache(key, node.get());
+         return node;
+     }
+ 
+diff --git a/components/terrain/storage.hpp b/components/terrain/storage.hpp
+index 436efd8..dfc17fb 100644
+--- a/components/terrain/storage.hpp
++++ b/components/terrain/storage.hpp
+@@ -1,6 +1,7 @@
+ #ifndef COMPONENTS_TERRAIN_STORAGE_H
+ #define COMPONENTS_TERRAIN_STORAGE_H
+ 
++#include <cstdint>
+ #include <vector>
+ 
+ #include <osg/Array>
+@@ -28,6 +29,10 @@ namespace Terrain
+         virtual ~Storage() = default;
+ 
+     public:
++        /// OpenTW: changes whenever land data is edited at runtime. Results built from land data are only cached
++        /// when the revision did not change while they were built (they may have used the old data).
++        virtual std::uint64_t getRevision() const { return 0; }
++
+         /// Get bounds of the whole terrain in cell units
+         virtual void getBounds(float& minX, float& maxX, float& minY, float& maxY, ESM::RefId worldspace) = 0;
+ 
+diff --git a/components/terrain/terraingrid.cpp b/components/terrain/terraingrid.cpp
+index f6d90bc..4cc483f 100644
+--- a/components/terrain/terraingrid.cpp
++++ b/components/terrain/terraingrid.cpp
+@@ -120,6 +120,19 @@ namespace Terrain
+         updateWaterCulling();
+     }
+ 
++    void TerrainGrid::reloadCells(const std::vector<std::pair<int, int>>& cells)
++    {
++        clearAssociatedCaches();
++        for (const auto& cell : cells)
++        {
++            if (mGrid.find(cell) == mGrid.end())
++                continue;
++            TerrainGrid::unloadCell(cell.first, cell.second);
++            TerrainGrid::loadCell(cell.first, cell.second);
++        }
++        rebuildViews();
++    }
++
+     void TerrainGrid::updateWaterCulling()
+     {
+         if (!mHeightCullCallback)
+diff --git a/components/terrain/terraingrid.hpp b/components/terrain/terraingrid.hpp
+index eac2ccc..4381306 100644
+--- a/components/terrain/terraingrid.hpp
++++ b/components/terrain/terraingrid.hpp
+@@ -40,6 +40,8 @@ namespace Terrain
+         /// @note Not thread safe.
+         void unloadCell(int x, int y) override;
+ 
++        void reloadCells(const std::vector<std::pair<int, int>>& cells) override;
++
+         std::unique_ptr<View> createView() override;
+ 
+     protected:
+diff --git a/components/terrain/world.hpp b/components/terrain/world.hpp
+index 83e7889..162a574 100644
+--- a/components/terrain/world.hpp
++++ b/components/terrain/world.hpp
+@@ -7,6 +7,8 @@
+ 
+ #include <memory>
+ #include <set>
++#include <utility>
++#include <vector>
+ 
+ #include <components/esm/refid.hpp>
+ 
+@@ -99,6 +101,13 @@ namespace Terrain
+ 
+         virtual void rebuildViews() {}
+ 
++        /// OpenTW: the land data of these cells changed at runtime; drop cached chunks and rebuild what is shown.
++        virtual void reloadCells(const std::vector<std::pair<int, int>>& cells)
++        {
++            clearAssociatedCaches();
++            rebuildViews();
++        }
++
+         virtual void reportStats(unsigned int frameNumber, osg::Stats* stats) {}
+ 
+         virtual void setViewDistance(float distance) {}
+-- 
+2.49.0
+
