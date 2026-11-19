@@ -27,8 +27,10 @@ tools/build_opentw.sh            # clones OpenMW 0.52 RC1 into ../opentw, applie
 
 That downloads OpenMW's prebuilt macOS dependency bundle (the one its CI
 uses), builds only the game (no launcher or editor, so no Qt), and leaves
-`../opentw/build/OpenMW.app`. Start that instead of the normal OpenMW.app: it
-reads the same `openmw.cfg`, data files and saves. The first build took about
+`../opentw/build/OpenMW.app`. Start that instead of the normal OpenMW.app (it
+shows up as "OpenTW"): it reads the same `openmw.cfg`, data files and saves.
+It has no launcher and goes straight into the game, so pick mods and data
+files in the normal OpenMW launcher; OpenTW uses the same settings. The first build took about
 5 minutes on a 14-core M-series Mac.
 
 ## The engine API

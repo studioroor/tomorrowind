@@ -1,7 +1,7 @@
 From 3cf075a2fbbfa846c2aff1907acc1114e9454f98 Mon Sep 17 00:00:00 2001
 From: Drikus Roor <drikusroor@gmail.com>
 Date: Wed, 18 Nov 2026 21:49:22 +0100
-Subject: [PATCH 3/3] OpenTW: validate terrain brush input from Lua
+Subject: [PATCH 3/4] OpenTW: validate terrain brush input from Lua
 
 Reject non-finite or out-of-world centres (and bad radii) in the bindings,
 where the Lua caller gets the error, and again in Terraformer before any

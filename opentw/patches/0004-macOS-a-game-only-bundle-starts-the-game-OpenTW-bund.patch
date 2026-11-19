@@ -1,0 +1,59 @@
+From 1177da6bd6787fd34376b443334bd1e16c4402f9 Mon Sep 17 00:00:00 2001
+From: Drikus Roor <drikusroor@gmail.com>
+Date: Thu, 19 Nov 2026 22:08:49 +0100
+Subject: [PATCH 4/4] macOS: a game-only bundle starts the game; OpenTW bundle
+ id
+
+Without the launcher the bundle pointed at a missing openmw-launcher, so
+Finder and open refused it. Also give it its own id and name so macOS does
+not mix it up with an installed OpenMW.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ CMakeLists.txt                 | 6 ++++++
+ files/mac/openmw-Info.plist.in | 6 +++---
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 125f53d..0f88962 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -590,6 +590,12 @@ if(MYGUI_STATIC)
+ endif (MYGUI_STATIC)
+ 
+ if (APPLE)
++    # A game-only build has no launcher: then the bundle starts the game itself
++    if (BUILD_LAUNCHER)
++        set(OPENMW_BUNDLE_EXECUTABLE openmw-launcher)
++    else ()
++        set(OPENMW_BUNDLE_EXECUTABLE openmw)
++    endif ()
+     configure_file(${OpenMW_SOURCE_DIR}/files/mac/openmw-Info.plist.in
+         "${APP_BUNDLE_DIR}/Contents/Info.plist")
+ 
+diff --git a/files/mac/openmw-Info.plist.in b/files/mac/openmw-Info.plist.in
+index c0282c0..c9ba8c1 100644
+--- a/files/mac/openmw-Info.plist.in
++++ b/files/mac/openmw-Info.plist.in
+@@ -7,15 +7,15 @@
+ 	<key>CFBundleDevelopmentRegion</key>
+ 	<string>English</string>
+ 	<key>CFBundleExecutable</key>
+-	<string>openmw-launcher</string>
++	<string>${OPENMW_BUNDLE_EXECUTABLE}</string>
+ 	<key>CFBundleIdentifier</key>
+-	<string>org.openmw.openmw</string>
++	<string>org.openmw.opentw</string>
+ 	<key>CFBundleInfoDictionaryVersion</key>
+ 	<string>6.0</string>
+ 	<key>CFBundleLongVersionString</key>
+ 	<string></string>
+ 	<key>CFBundleName</key>
+-	<string>OpenMW</string>
++	<string>OpenTW</string>
+ 	<key>CFBundlePackageType</key>
+ 	<string>APPL</string>
+ 	<key>CFBundleSignature</key>
+-- 
+2.49.0
+

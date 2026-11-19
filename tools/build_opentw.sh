@@ -48,4 +48,6 @@ cmake .. -G"Unix Makefiles" -DCMAKE_BUILD_TYPE=RelWithDebInfo \
   -DVCPKG_HOST_TRIPLET=arm64-osx-dynamic -DVCPKG_TARGET_TRIPLET=arm64-osx-dynamic \
   -DCMAKE_TOOLCHAIN_FILE="$D/scripts/buildsystems/vcpkg.cmake"
 make -j"$(sysctl -n hw.ncpu)" openmw
-echo "Built: $WORK/build/OpenMW.app"
+# Finder caches app bundles: make it see the fresh one
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$WORK/build/OpenMW.app" || true
+echo "Built: $WORK/build/OpenMW.app (open it from Finder or with: open \"$WORK/build/OpenMW.app\")"
