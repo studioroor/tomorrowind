@@ -1,7 +1,7 @@
 From f9f5930da20d10f5fb53a727d46cdc4ff83c3f04 Mon Sep 17 00:00:00 2001
 From: Drikus Roor <drikusroor@gmail.com>
 Date: Wed, 18 Nov 2026 21:46:22 +0100
-Subject: [PATCH 2/4] OpenTW: runtime terraforming (openmw.world.terrain)
+Subject: [PATCH 2/5] OpenTW: runtime terraforming (openmw.world.terrain)
 
 Global Lua scripts can now change the land of the default worldspace while
 the game runs:

@@ -1,0 +1,209 @@
+From ae23b4860ccc13dfe55a418a825819629f6cd3b2 Mon Sep 17 00:00:00 2001
+From: Drikus Roor <drikusroor@gmail.com>
+Date: Thu, 19 Nov 2026 22:43:08 +0100
+Subject: [PATCH 5/5] OpenTW: terrain.paintLine; painting doesn't rebuild
+ collision
+
+paintLine paints along a segment (roads) as one edit. Texture-only edits
+refresh just the rendering: collision, navmesh and actors are unaffected.
+terrain.VERSION is 2.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ apps/openmw/mwbase/world.hpp          |  6 +++--
+ apps/openmw/mwlua/terrainbindings.cpp | 37 ++++++++++++++++++++++-----
+ apps/openmw/mwworld/terraformer.cpp   | 29 ++++++++++++++++-----
+ apps/openmw/mwworld/terraformer.hpp   |  3 +++
+ apps/openmw/mwworld/worldimp.cpp      |  5 +++-
+ apps/openmw/mwworld/worldimp.hpp      |  3 ++-
+ 6 files changed, 66 insertions(+), 17 deletions(-)
+
+diff --git a/apps/openmw/mwbase/world.hpp b/apps/openmw/mwbase/world.hpp
+index e2ab9bf..ff94274 100644
+--- a/apps/openmw/mwbase/world.hpp
++++ b/apps/openmw/mwbase/world.hpp
+@@ -582,9 +582,11 @@ namespace MWBase
+         virtual MWWorld::Terraformer& getTerraformer() const = 0;
+ 
+         /// OpenTW: after editing the land of these cells, reload rendering, collision and navmesh,
+-        /// and put actors within radius of center back on the ground.
++        /// and put actors within radius of center back on the ground. Without shapeChanged (only textures
++        /// changed) just the rendering is refreshed.
+         virtual void refreshTerrain(
+-            const std::vector<std::pair<int, int>>& cells, const osg::Vec3f& center, float radius)
++            const std::vector<std::pair<int, int>>& cells, const osg::Vec3f& center, float radius,
++            bool shapeChanged = true)
+             = 0;
+ 
+         /// Return physical or rendering half extents of the given actor.
+diff --git a/apps/openmw/mwlua/terrainbindings.cpp b/apps/openmw/mwlua/terrainbindings.cpp
+index ff502a7..11d6732 100644
+--- a/apps/openmw/mwlua/terrainbindings.cpp
++++ b/apps/openmw/mwlua/terrainbindings.cpp
+@@ -24,12 +24,13 @@ namespace MWLua
+         // Edits are applied on the main thread after the Lua update, in the order they were made.
+         // reach: how far around center actors may need to be put back on the ground.
+         template <class Fn>
+-        void queue(const Context& context, const osg::Vec3f& center, float reach, std::string_view name, Fn&& fn)
++        void queue(const Context& context, const osg::Vec3f& center, float reach, std::string_view name, Fn&& fn,
++            bool shapeChanged = true)
+         {
+             context.mLuaManager->addAction(
+-                [center, reach, fn = std::forward<Fn>(fn)] {
++                [center, reach, shapeChanged, fn = std::forward<Fn>(fn)] {
+                     MWBase::World& world = *MWBase::Environment::get().getWorld();
+-                    world.refreshTerrain(fn(world.getTerraformer()), center, reach + 256.f);
++                    world.refreshTerrain(fn(world.getTerraformer()), center, reach + 256.f, shapeChanged);
+                 },
+                 name);
+         }
+@@ -42,7 +43,7 @@ namespace MWLua
+         sol::table api(lua, sol::create);
+ 
+         // Lets mods detect OpenTW: `if world.terrain then ... end`
+-        api["VERSION"] = 1;
++        api["VERSION"] = 2; // 2: paintLine
+ 
+         api["flatten"] = [context](const Misc::FiniteVec3f& centerArg, FiniteFloat radius, FiniteFloat height,
+                              sol::optional<FiniteFloat> falloff) {
+@@ -77,9 +78,31 @@ namespace MWLua
+             const float r = radius;
+             MWWorld::Terraformer::checkBrush(osg::Vec2f(center.x(), center.y()), r, 0.f);
+             const auto [plugin, index] = *found;
+-            queue(context, center, 0.f, "terrain.paint", [=](MWWorld::Terraformer& t) {
+-                return t.paint(osg::Vec2f(center.x(), center.y()), r, index, plugin);
+-            });
++            queue(
++                context, center, 0.f, "terrain.paint",
++                [=](MWWorld::Terraformer& t) { return t.paint(osg::Vec2f(center.x(), center.y()), r, index, plugin); },
++                false);
++        };
++
++        api["paintLine"] = [context](const Misc::FiniteVec3f& fromArg, const Misc::FiniteVec3f& toArg,
++                               FiniteFloat radius, std::string_view texture) {
++            const auto found
++                = MWBase::Environment::get().getESMStore()->get<ESM::LandTexture>().searchIndex(texture);
++            if (!found)
++                throw std::runtime_error("Unknown land texture: " + std::string(texture));
++            const osg::Vec3f from3 = fromArg;
++            const osg::Vec3f to3 = toArg;
++            const osg::Vec2f from(from3.x(), from3.y());
++            const osg::Vec2f to(to3.x(), to3.y());
++            const float r = radius;
++            MWWorld::Terraformer::checkBrush(from, r, 0.f);
++            MWWorld::Terraformer::checkBrush(to, r, 0.f);
++            if ((to - from).length() > 16 * 8192.f)
++                throw std::runtime_error("terrain.paintLine: longer than 16 cells");
++            const auto [plugin, index] = *found;
++            queue(
++                context, from3, 0.f, "terrain.paintLine",
++                [=](MWWorld::Terraformer& t) { return t.paintLine(from, to, r, index, plugin); }, false);
+         };
+ 
+         api["reset"] = [context]() {
+diff --git a/apps/openmw/mwworld/terraformer.cpp b/apps/openmw/mwworld/terraformer.cpp
+index d6e6e56..2f9b45b 100644
+--- a/apps/openmw/mwworld/terraformer.cpp
++++ b/apps/openmw/mwworld/terraformer.cpp
+@@ -19,6 +19,7 @@ namespace MWWorld
+         constexpr int sTexels = ESM::Land::LAND_TEXTURE_SIZE; // 16 per side
+         constexpr float sTexelSize = sCellSize / sTexels; // 512
+         constexpr float sMaxBrush = sCellSize * 4;
++        constexpr float sMaxLine = sCellSize * 16;
+         constexpr float sMaxCoordinate = 1e7f; // ~1200 cells: far beyond any map, safe to convert to int
+         constexpr int sAllData = ESM::Land::DATA_VHGT | ESM::Land::DATA_VNML | ESM::Land::DATA_VCLR
+             | ESM::Land::DATA_VTEX;
+@@ -250,12 +251,28 @@ namespace MWWorld
+     std::vector<Terraformer::CellPos> Terraformer::paint(
+         const osg::Vec2f& center, float radius, std::uint32_t index, int plugin)
+     {
+-        checkBrush(center, radius, 0.f);
++        return paintLine(center, center, radius, index, plugin);
++    }
++
++    std::vector<Terraformer::CellPos> Terraformer::paintLine(
++        const osg::Vec2f& from, const osg::Vec2f& to, float radius, std::uint32_t index, int plugin)
++    {
++        checkBrush(from, radius, 0.f);
++        checkBrush(to, radius, 0.f);
++        const osg::Vec2f dir = to - from;
++        const float length2 = dir.length2();
++        if (length2 > sMaxLine * sMaxLine)
++            throw std::runtime_error("terrain paintLine: longer than 16 cells");
++        // distance from p to the segment
++        const auto distance = [&](const osg::Vec2f& p) {
++            const float t = length2 > 0 ? std::clamp(((p - from) * dir) / length2, 0.f, 1.f) : 0.f;
++            return (p - (from + dir * t)).length();
++        };
+         const std::uint16_t value = static_cast<std::uint16_t>(index + 1);
+-        const int cx0 = static_cast<int>(std::floor((center.x() - radius) / sCellSize)) - 1;
+-        const int cx1 = static_cast<int>(std::floor((center.x() + radius) / sCellSize)) + 1;
+-        const int cy0 = static_cast<int>(std::floor((center.y() - radius) / sCellSize)) - 1;
+-        const int cy1 = static_cast<int>(std::floor((center.y() + radius) / sCellSize)) + 1;
++        const int cx0 = static_cast<int>(std::floor((std::min(from.x(), to.x()) - radius) / sCellSize)) - 1;
++        const int cx1 = static_cast<int>(std::floor((std::max(from.x(), to.x()) + radius) / sCellSize)) + 1;
++        const int cy0 = static_cast<int>(std::floor((std::min(from.y(), to.y()) - radius) / sCellSize)) - 1;
++        const int cy1 = static_cast<int>(std::floor((std::max(from.y(), to.y()) + radius) / sCellSize)) + 1;
+ 
+         const std::lock_guard lock(mMutex);
+         Changed changed;
+@@ -267,7 +284,7 @@ namespace MWWorld
+                         // Texels are drawn a quarter texel off their grid square (see core.land.getTextureAt)
+                         const osg::Vec2f p(cx * sCellSize + (tx + 0.75f) * sTexelSize,
+                             cy * sCellSize + (ty + 0.25f) * sTexelSize);
+-                        if ((p - center).length() > radius)
++                        if (distance(p) > radius)
+                             continue;
+                         const std::size_t i = static_cast<std::size_t>(ty * sTexels + tx);
+                         const Cell& src = source({ cx, cy });
+diff --git a/apps/openmw/mwworld/terraformer.hpp b/apps/openmw/mwworld/terraformer.hpp
+index 3a05bfb..80403cb 100644
+--- a/apps/openmw/mwworld/terraformer.hpp
++++ b/apps/openmw/mwworld/terraformer.hpp
+@@ -62,6 +62,9 @@ namespace MWWorld
+         std::vector<CellPos> raise(const osg::Vec2f& center, float radius, float falloff, float delta);
+         /// Paint every texel whose centre is within radius. index is the LTEX index (not +1).
+         std::vector<CellPos> paint(const osg::Vec2f& center, float radius, std::uint32_t index, int plugin);
++        /// Paint every texel within radius of the segment from-to (at most 16 cells long).
++        std::vector<CellPos> paintLine(
++            const osg::Vec2f& from, const osg::Vec2f& to, float radius, std::uint32_t index, int plugin);
+         /// Undo all edits.
+         std::vector<CellPos> reset();
+ 
+diff --git a/apps/openmw/mwworld/worldimp.cpp b/apps/openmw/mwworld/worldimp.cpp
+index 72ffc30..3973bf2 100644
+--- a/apps/openmw/mwworld/worldimp.cpp
++++ b/apps/openmw/mwworld/worldimp.cpp
+@@ -3597,11 +3597,14 @@ namespace MWWorld
+         return mRendering->getTerrainHeightAt(worldPos, worldspace);
+     }
+ 
+-    void World::refreshTerrain(const std::vector<std::pair<int, int>>& cells, const osg::Vec3f& center, float radius)
++    void World::refreshTerrain(
++        const std::vector<std::pair<int, int>>& cells, const osg::Vec3f& center, float radius, bool shapeChanged)
+     {
+         if (cells.empty())
+             return;
+         mRendering->refreshTerrain(cells);
++        if (!shapeChanged)
++            return;
+         mWorldScene->reloadTerrain(cells);
+ 
+         std::vector<Ptr> actors;
+diff --git a/apps/openmw/mwworld/worldimp.hpp b/apps/openmw/mwworld/worldimp.hpp
+index e1c0a2b..f7077b3 100644
+--- a/apps/openmw/mwworld/worldimp.hpp
++++ b/apps/openmw/mwworld/worldimp.hpp
+@@ -650,7 +650,8 @@ namespace MWWorld
+         MWWorld::Terraformer& getTerraformer() const override { return *mTerraformer; }
+ 
+         void refreshTerrain(
+-            const std::vector<std::pair<int, int>>& cells, const osg::Vec3f& center, float radius) override;
++            const std::vector<std::pair<int, int>>& cells, const osg::Vec3f& center, float radius,
++            bool shapeChanged = true) override;
+ 
+         /// Return physical or rendering half extents of the given actor.
+         osg::Vec3f getHalfExtents(const MWWorld::ConstPtr& actor, bool rendering = false) const override;
+-- 
+2.49.0
+

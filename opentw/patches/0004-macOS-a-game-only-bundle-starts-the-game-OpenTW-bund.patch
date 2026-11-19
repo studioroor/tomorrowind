@@ -1,7 +1,7 @@
 From 1177da6bd6787fd34376b443334bd1e16c4402f9 Mon Sep 17 00:00:00 2001
 From: Drikus Roor <drikusroor@gmail.com>
 Date: Thu, 19 Nov 2026 22:08:49 +0100
-Subject: [PATCH 4/4] macOS: a game-only bundle starts the game; OpenTW bundle
+Subject: [PATCH 4/5] macOS: a game-only bundle starts the game; OpenTW bundle
  id
 
 Without the launcher the bundle pointed at a missing openmw-launcher, so

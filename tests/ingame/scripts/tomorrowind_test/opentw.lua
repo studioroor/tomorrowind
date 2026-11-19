@@ -67,6 +67,17 @@ local function verify(label)
     check(math.abs(m.mound - (S.before.mound + 350)) < 3,
         string.format('%s: mound raised 350 (%.0f, was %.0f)', label, m.mound, S.before.mound))
     check(m.sandTex:lower():find('sand') ~= nil, label .. ': landscaping tool painted sand (' .. m.sandTex .. ')')
+    -- the house's road runs towards the storehouse (at the founding spot)
+    local onRoad, seen = 0, {}
+    for _, f in ipairs({ 0.4, 0.55, 0.7 }) do
+        local x, y = S.house.x + (S.base.x - S.house.x) * f, S.house.y + (S.base.y - S.house.y) * f
+        local tx = tex(x, y)
+        seen[#seen + 1] = tx
+        if tx:lower():find('dirtroad') then onRoad = onRoad + 1 end
+    end
+    check(onRoad == 3, label .. ': a road leads from the house to the storehouse (' .. table.concat(seen, ', ') .. ')')
+    local side = tex(S.house.x + (S.base.x - S.house.x) * 0.55 + 1500, S.house.y + (S.base.y - S.house.y) * 0.55 - 1000)
+    check(not side:lower():find('dirtroad'), label .. ': but not beside it (' .. side .. ')')
 end
 
 return {
@@ -91,7 +102,8 @@ return {
             once('found', 3, t, function() core.sendGlobalEvent('TMW_Found', { yaw = 0 }) end)
             once('build', 6, t, function()
                 local base = self.position
-                S = { house = v3(base.x + 1300, base.y - 2000, 0), mound = v3(base.x - 1500, base.y - 1500, 0) }
+                S = { house = v3(base.x + 1300, base.y - 2000, 0), mound = v3(base.x - 1500, base.y - 1500, 0),
+                    base = v3(base.x, base.y, 0) }
                 local ring = {}
                 for i = 0, 7 do
                     local a = i * math.pi / 4

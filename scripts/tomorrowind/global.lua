@@ -1710,7 +1710,7 @@ local function placeConfirm(e)
         { foundation = e.foundation, variant = variant, host = objs.insideHost })
     s.leveled = true -- e.pos.z is the computed floor level
     s.radius, s.half = e.radius, e.half
-    landscape.prepareSite(s) -- OpenTW: level and pave the ground
+    landscape.prepareSite(s, c) -- OpenTW: level and pave the ground
     if look.price then
         -- bought: paid from the treasury and there at once
         c.gold = C.gold(c) - look.price
@@ -1764,7 +1764,7 @@ local function debugCommand(e)
     elseif e.cmd == 'build' and c then
         local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation, variant = e.variant, host = e.host })
         s.leveled, s.radius, s.half = e.leveled, e.radius, e.half
-        if e.leveled then landscape.prepareSite(s) end
+        if e.leveled then landscape.prepareSite(s, c) end
         if e.built then setSiteObject(s.id) end
         processEvents()
     elseif e.cmd == 'tp' then

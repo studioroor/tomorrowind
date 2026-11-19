@@ -39,7 +39,8 @@ PID=$!
 for t in ${SHOTS:-20 45 75 110 140}; do
   sleep_until=$((SECONDS + t - ${last:-0})); last=$t
   while [ $SECONDS -lt $sleep_until ] && kill -0 $PID 2>/dev/null; do sleep 1; done
-  WID=$("$OUT/winid" openmw 2>/dev/null) && kill -0 $PID 2>/dev/null && screencapture -x -o -l "$WID" "$OUT/shots/t$t.png" 2>/dev/null
+  # by pid: this run's window, not another OpenMW/OpenTW you have open
+  WID=$("$OUT/winid" $PID 2>/dev/null) && kill -0 $PID 2>/dev/null && screencapture -x -o -l "$WID" "$OUT/shots/t$t.png" 2>/dev/null
 done
 # the autotest quits the game itself; this is only a safety net
 while kill -0 $PID 2>/dev/null && [ $SECONDS -lt ${MAX_SECONDS:-240} ]; do sleep 1; done

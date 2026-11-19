@@ -8,6 +8,10 @@ change the land while the game runs. On OpenTW the mod also
   is pulled to the building's floor, blends back into the slope around it,
   and gets a ground texture (cobblestones for the storehouse, market and
   warehouse, tilled soil for farms, a dirt road for houses, dirt elsewhere);
+- **lays a road from every new building** to the nearest existing road, or to
+  the storehouse (the town centre) when that's nearer, so the colony grows a
+  road network (`scripts/tomorrowind/core/roads.lua`). Roads are about one
+  texel (512 units) wide: that's the resolution of Morrowind's land textures;
 - adds a **landscaping tool** (**L**): raise and lower the ground, level it,
   and paint it. Dig below sea level for a pond or a river, raise the sea floor
   for an island.
@@ -44,8 +48,12 @@ mod detects OpenTW). All positions are world units in the default
 | `terrain.flatten(center, radius, height[, falloff])` | Pull the ground to `height`: fully within `radius`, fading out over `falloff` (default `radius / 2`). |
 | `terrain.raise(center, radius, delta[, falloff])` | Raise the ground by `delta` (negative lowers it). |
 | `terrain.paint(center, radius, texture)` | Paint every texel within `radius`. `texture` is a LTEX record id (`'Sand'`, `'AI_Grass_Cobbles'`) or texture file (`'tx_sand_01'`); unknown ones raise an error. |
+| `terrain.paintLine(from, to, radius, texture)` | Paint every texel within `radius` of the line `from`-`to` (at most 16 cells long): roads. |
 | `terrain.reset()` | Undo every edit. |
-| `terrain.VERSION` | `1` |
+| `terrain.VERSION` | `2` (`paintLine` came in 2) |
+
+Painting only redraws the land; raising, lowering and flattening also
+rebuild collision and the navmesh.
 
 Edits are queued and applied after the current Lua update, in order, so
 `core.land.getHeightAt` sees them from the next frame on. `core.land.getTextureAt`
@@ -110,6 +118,8 @@ both engines.
   far above the original land can pop out of view at the screen edge.
 - The global map, local map and `WNAM` low-res heights don't change.
 - Default worldspace only; no editing of interior "exteriors" or ESM4.
+- Roads are straight lines: they don't go around buildings, steep ground or
+  water, and moving or removing a building leaves its road.
 - Foundation wood is still charged on slopes; on OpenTW the slope analysis
   should drop the pilings' cost.
 - Builds for Windows and Linux follow the same pattern as OpenMW's CI.

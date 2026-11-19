@@ -737,6 +737,15 @@ defs.landscape = {
         farm = 'AI_Tilled_Dirt',
         house = 'AI_Dirtroad',
     },
+    -- a road from every new building to the nearest road or the storehouse.
+    -- Land textures are 512 units a texel: a width (radius) of 300 paints a
+    -- road about one texel wide without gaps.
+    road = {
+        texture = 'AI_Dirtroad', width = 300,
+        minLength = 300,    -- closer than this to a road: none
+        maxLength = 12000,  -- further than this from town: none
+        skip = { storehouse = true, move = true, salvage = true },
+    },
     -- the landscaping tool (L)
     brush = { radius = 400, min = 100, max = 2500, speed = 400 },
     textures = {
