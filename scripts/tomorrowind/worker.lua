@@ -187,8 +187,28 @@ local function hop(pos)
     core.sendGlobalEvent('TMW_Hop', { actor = self.object, pos = pos })
 end
 
+-- How far a tree's trunk reaches out from its middle: a ray in from the
+-- side the worker comes from, at chest height. nil if nothing was hit.
+local function trunkRadius(tree, center)
+    if not (tree and tree:isValid()) then return nil end
+    local away = flat(self.position) - flat(center)
+    if away:length() < 1 then away = util.vector3(1, 0, 0) end
+    away = away:normalize()
+    local h = util.vector3(0, 0, 90)
+    local res = nearby.castRay(center + away * 400 + h, center + h, { collisionType = nearby.COLLISION_TYPE.World })
+    if res.hit and res.hitObject and res.hitObject.id == tree.id then
+        return dist2d(res.hitPos, center)
+    end
+end
+
 handlers['goto'] = {
     start = function(s)
+        if s.trunk then
+            -- felling a tree: stand right at the trunk, however thick
+            local r = trunkRadius(s.trunk, s.center)
+            if r and r < 350 then s.standoff = r + 45 end
+            if debugOn then print(string.format('[Tomorrowind] %s trunk radius %s standoff %.0f', tostring(wid), tostring(r), s.standoff or -1)) end
+        end
         s.elapsed, s.checkT, s.stuck = 0, 0, 0
         s.lastPos = self.position
         travelNext(s)

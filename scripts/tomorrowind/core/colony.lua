@@ -349,11 +349,13 @@ C.materialsComplete = function(c, sid) return materialsComplete(c.sites[sid]) en
 local function siteWork(s) return s.work or def(s).work end
 
 local finishMove -- with the moves below
+local plantSite  -- with the trees below
 
 local function finishBuilding(c, s)
     s.built = true
     s.progress = siteWork(s)
     if def(s).moves then return finishMove(c, s) end
+    if def(s).plants then return plantSite(c, s) end
     emit(c, { kind = 'built', site = s.id })
     emit(c, { kind = 'msg', text = def(s).name .. ' is finished.' })
 end
@@ -702,6 +704,331 @@ local function unreserve(c, res, amount)
 end
 
 ---------------------------------------------------------------------------
+-- trees
+--
+-- The trees around the colony, the game's own and the ones planted: c.trees
+-- (tid -> tree), in c.treeOrder. A tree: { id=, pos=, model= (Static record),
+-- grow= (size, sapling..1), wood= (timber left), felled=, sproutIn= (hours
+-- until a felled tree's stump sprouts), planted=, yaw=, size= }.
+-- Woodcutters fell the full-grown trees around their camp; a camp with no
+-- trees around at all (from before trees counted) works at its stump.
+
+local function treesOf(c)
+    c.trees = c.trees or {}
+    c.treeOrder = c.treeOrder or {}
+    return c.trees, c.treeOrder
+end
+
+local function flatDist(a, b)
+    local dx, dy = a.x - b.x, a.y - b.y
+    return math.sqrt(dx * dx + dy * dy)
+end
+
+function C.addTree(c, info)
+    local trees, order = treesOf(c)
+    local grow = info.grow or 1
+    local t = {
+        id = newId(c, 't'),
+        pos = { x = info.pos.x, y = info.pos.y, z = info.pos.z or 0 },
+        model = info.model,
+        grow = grow,
+        wood = grow >= 1 and defs.trees.wood or 0,
+        felled = false,
+        planted = info.planted or nil,
+        yaw = info.yaw, size = info.size,
+    }
+    trees[t.id] = t
+    order[#order + 1] = t.id
+    return t
+end
+
+function C.tree(c, tid) return (treesOf(c))[tid] end
+
+local function treeReady(t) return not t.felled and t.grow >= 1 and t.wood > 0 end
+C.treeReady = treeReady
+
+-- Is there a tree standing (grown or growing) within `reach` of `pos`? `list`
+-- is a list of { pos=, felled= }: c's trees, or the UI's copy of them.
+function C.treeNear(list, pos, reach)
+    for _, t in ipairs(list) do
+        if not t.felled and flatDist(t.pos, pos) <= reach then return true end
+    end
+    return false
+end
+
+function C.treeList(c)
+    local trees, order = treesOf(c)
+    local list = {}
+    for i, tid in ipairs(order) do list[i] = trees[tid] end
+    return list
+end
+
+-- Every tree within the woodcutters' reach of camp `s`.
+local function campTrees(c, s)
+    local trees, order = treesOf(c)
+    local list = {}
+    for _, tid in ipairs(order) do
+        local t = trees[tid]
+        if flatDist(t.pos, s.pos) <= defs.trees.reach then list[#list + 1] = t end
+    end
+    return list
+end
+
+-- Does this camp fell trees (and not just chop at its stump)?
+local function fellsTrees(c, s)
+    return def(s).fells and #campTrees(c, s) > 0
+end
+
+-- Trees around a camp: { ready=, growing=, felled= }.
+function C.campTrees(c, sid)
+    local n = { ready = 0, growing = 0, felled = 0 }
+    for _, t in ipairs(campTrees(c, c.sites[sid])) do
+        if t.felled then n.felled = n.felled + 1
+        elseif treeReady(t) then n.ready = n.ready + 1
+        else n.growing = n.growing + 1 end
+    end
+    return n
+end
+
+-- The tree a woodcutter of camp `s` goes for: the closest grown one, one
+-- nobody else is felling if there is one. `wid` doesn't count against it.
+local function pickTree(c, s, wid)
+    local busy = {}
+    for _, id in ipairs(c.workerOrder) do
+        local t = c.workers[id].task
+        if id ~= wid and t and t.tree then busy[t.tree] = (busy[t.tree] or 0) + 1 end
+    end
+    local best, bestScore
+    for _, t in ipairs(campTrees(c, s)) do
+        if treeReady(t) then
+            local n = busy[t.id] or 0
+            local score = flatDist(t.pos, s.pos) + (n >= defs.trees.choppersPerTree and 1e6 * n or 0)
+            if not bestScore or score < bestScore then best, bestScore = t, score end
+        end
+    end
+    return best
+end
+
+-- A camp whose trees are all down or still growing.
+local function outOfTrees(c, s)
+    return fellsTrees(c, s) and not pickTree(c, s)
+end
+
+-- Timber taken from a tree: the last of it brings the tree down.
+local function chopTree(c, tid, amount)
+    local t = (treesOf(c))[tid]
+    if not t or t.felled then return end
+    t.wood = t.wood - amount
+    if t.wood <= 0 then
+        t.wood, t.felled, t.grow, t.sproutIn = 0, true, 0, defs.trees.sproutHours
+        emit(c, { kind = 'tree_felled', tree = tid })
+    end
+end
+
+-- Stumps sprout, saplings grow; a grown tree has its timber.
+local function growTrees(c, hours)
+    if hours <= 0 or not c.treeOrder then return end
+    local cfg = defs.trees
+    for _, tid in ipairs(c.treeOrder) do
+        local t = c.trees[tid]
+        if t.felled then
+            t.sproutIn = t.sproutIn - hours
+            if t.sproutIn <= 0 then
+                t.felled, t.sproutIn, t.grow, t.wood = false, nil, cfg.sapling, 0
+                emit(c, { kind = 'tree_sprouted', tree = tid })
+            end
+        elseif t.grow < 1 then
+            t.grow = math.min(1, t.grow + hours * (1 - cfg.sapling) / cfg.growHours)
+            if t.grow >= 1 then t.wood = cfg.wood end
+        end
+    end
+end
+
+-- Where a planting's saplings go: one in the middle, the rest in a loose,
+-- slightly uneven ring around it.
+local function plantSpots(s, n)
+    local spots = { { x = s.pos.x, y = s.pos.y, z = s.pos.z } }
+    local R = defs.trees.groveRadius
+    for i = 2, n do
+        local a = (s.yaw or 0) + (i - 2) * 2 * math.pi / (n - 1) + ((i * 37) % 10) / 10 * 0.5
+        local r = R * (0.7 + ((i * 53) % 10) / 30)
+        spots[i] = { x = s.pos.x + math.sin(a) * r, y = s.pos.y + math.cos(a) * r, z = s.pos.z }
+    end
+    return spots
+end
+
+-- A planting is done: its saplings are the colony's trees now, and the
+-- site goes.
+plantSite = function(c, s)
+    local look = defs.look(s.kind, s.variant)
+    local n = look.plants
+    for i, p in ipairs(plantSpots(s, n)) do
+        local t = C.addTree(c, {
+            pos = p, model = look.tree or c.localTree or defs.treeKinds[1].tree, grow = defs.trees.sapling, planted = true,
+            yaw = (s.yaw or 0) + i * 2.4, size = n > 1 and (0.85 + ((i * 29) % 10) / 40) or 1,
+        })
+        emit(c, { kind = 'tree_planted', tree = t.id })
+    end
+    emit(c, { kind = 'msg', text = n > 1 and 'A grove has been planted.' or 'A tree has been planted.' })
+    C.removeSite(c, s.id)
+end
+
+---------------------------------------------------------------------------
+-- crops
+--
+-- A farm's field: s.plots, a list of { grow=, tendedAt= }, one per plot in
+-- the order of C.plotOffset. grow is nil for a bare plot, 0..1 while it
+-- grows, 1 when it's ripe. Farmers harvest, plant and tend plot by plot.
+
+local function plotCount()
+    local g = defs.crops.grid
+    return g * g - 1
+end
+C.plotCount = plotCount
+
+-- Where plot i lies in the farm's own frame (x, y): a grid with the middle
+-- left free.
+function C.plotOffset(i)
+    local g = defs.crops.grid
+    local half = math.floor(g / 2)
+    local k = i - 1
+    if k >= math.floor(g * g / 2) then k = k + 1 end
+    return (math.floor(k / g) - half) * defs.crops.spacing, (k % g - half) * defs.crops.spacing
+end
+
+local function growsCrops(s)
+    return s.built and def(s).crops
+end
+
+-- A field starts out mixed, a few plots ripe already, so a new farm feeds
+-- the colony straight away (and older saves' farms get one like it).
+local function plotsOf(s)
+    if not s.plots then
+        local n = plotCount()
+        s.plots = {}
+        for i = 1, n do
+            local v = (i * 7) % n
+            s.plots[i] = { grow = v > 0 and math.min(1, v / (n - 4)) or nil }
+        end
+    end
+    return s.plots
+end
+C.plotsOf = plotsOf
+
+local function plotRipe(p) return p.grow ~= nil and p.grow >= 1 end
+
+-- The plots of farm `sid`: { ripe=, growing=, bare= }.
+function C.farmPlots(c, sid)
+    local n = { ripe = 0, growing = 0, bare = 0 }
+    for _, p in ipairs(plotsOf(c.sites[sid])) do
+        if plotRipe(p) then n.ripe = n.ripe + 1
+        elseif p.grow then n.growing = n.growing + 1
+        else n.bare = n.bare + 1 end
+    end
+    return n
+end
+
+-- A plot for a farmer of `s` to work: 'ripe' (to harvest), 'bare' (to plant)
+-- or 'tend' (the growing plot left alone longest). None that another
+-- settler is already at; `wid` doesn't count against it.
+local function pickPlot(c, s, wid, want)
+    local busy = {}
+    for _, id in ipairs(c.workerOrder) do
+        local t = c.workers[id].task
+        if id ~= wid and t and t.plot and t.site == s.id then busy[t.plot] = true end
+    end
+    local best, bestAt
+    for i, p in ipairs(plotsOf(s)) do
+        if not busy[i] then
+            if want == 'ripe' and plotRipe(p) then return i end
+            if want == 'bare' and not p.grow then return i end
+            if want == 'tend' and p.grow and p.grow < 1 then
+                local at = p.tendedAt or -1e9
+                if not bestAt or at < bestAt then best, bestAt = i, at end
+            end
+        end
+    end
+    return best
+end
+
+-- A farm with nothing ripe has no food to give right now.
+local function outOfCrops(c, s)
+    return growsCrops(s) and not pickPlot(c, s, nil, 'ripe')
+end
+
+local function plotChanged(c, s, i)
+    emit(c, { kind = 'plot', site = s.id, plot = i })
+end
+
+-- What a farmer's work does to a plot (if it's still as it was).
+local function workPlot(c, s, i, effect)
+    local p = s and plotsOf(s)[i]
+    if not p then return false end
+    if effect == 'harvest' then
+        if not plotRipe(p) then return false end
+        p.grow, p.tendedAt = nil, nil
+    elseif effect == 'plant' then
+        if p.grow then return false end
+        p.grow = defs.crops.sprout
+    elseif effect == 'tend' then
+        if not p.grow or p.grow >= 1 then return false end
+        p.grow = math.min(1, p.grow + defs.crops.tendGrow)
+        p.tendedAt = c.hours
+    end
+    plotChanged(c, s, i)
+    return true
+end
+
+-- Crops grow; on a kwama nest, bare plots fill up again by themselves.
+local function growCrops(c, hours)
+    if hours <= 0 then return end
+    local rate = hours / defs.crops.growHours
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if growsCrops(s) then
+            local selfSown = defs.look(s.kind, s.variant).selfSown
+            for i, p in ipairs(plotsOf(s)) do
+                if not p.grow and selfSown then
+                    p.grow = 0
+                    plotChanged(c, s, i)
+                end
+                if p.grow and p.grow < 1 then
+                    p.grow = math.min(1, p.grow + rate)
+                    if p.grow >= 1 then plotChanged(c, s, i) end
+                end
+            end
+        end
+    end
+end
+
+-- A farmer away from the colony (or during a time skip): a round of work
+-- is a harvest and a planting, or else some tending.
+local function farmRound(c, s, wid)
+    local d = def(s)
+    local ripe = pickPlot(c, s, wid, 'ripe')
+    if ripe and storageFull(c, 'food') then
+        s.stalled = 'no room in the storehouse'
+        ripe = nil
+    else
+        s.stalled = nil
+    end
+    if ripe then
+        workPlot(c, s, ripe, 'harvest')
+        c.stock.food = c.stock.food + defs.crops.yield
+    end
+    local bare = not defs.look(s.kind, s.variant).selfSown and pickPlot(c, s, wid, 'bare')
+    if bare then workPlot(c, s, bare, 'plant') end
+    if not ripe and not bare then
+        -- tending fills the round
+        for _ = 1, math.floor(d.cycle / defs.crops.tendSeconds) do
+            local i = pickPlot(c, s, wid, 'tend')
+            if not i then break end
+            workPlot(c, s, i, 'tend')
+        end
+    end
+end
+
+---------------------------------------------------------------------------
 -- task planning
 
 local function step(op, t)
@@ -888,12 +1215,67 @@ local function tradeTask(c, w, s, speed)
     }
 end
 
+-- A farmer's next job on the field: harvest what's ripe, plant what's bare,
+-- else tend what grows.
+local function farmTask(c, w, s, speed)
+    local d, cfg = def(s), defs.crops
+    local look = defs.look(s.kind, s.variant)
+    local crop = look.cropName or 'crops'
+    local full = storageFull(c, 'food')
+    local function job(i, effect, seconds, label, carry)
+        local task = {
+            kind = 'gather', site = s.id, plot = i, label = d.job,
+            steps = {
+                step('goto', { to = s.id, plot = i, label = 'Walking to the ' .. d.name }),
+                step('work', {
+                    at = s.id, plot = i, duration = seconds / speed, tool = d.tool,
+                    effect = effect, res = carry and 'food' or nil, amount = carry and cfg.yield or nil, label = label,
+                }),
+            },
+        }
+        if carry then
+            task.steps[3] = step('goto', { to = storeId(c), label = 'Carrying ' .. resName('food') .. ' to the storehouse' })
+            task.steps[4] = step('store', { label = 'Storing ' .. resName('food') })
+        end
+        return task
+    end
+    local i = not full and pickPlot(c, s, w.id, 'ripe')
+    s.stalled = (full and pickPlot(c, s, w.id, 'ripe')) and 'no room in the storehouse' or nil
+    if i then return job(i, 'harvest', cfg.harvestSeconds, 'Harvesting ' .. crop, true) end
+    i = not look.selfSown and pickPlot(c, s, w.id, 'bare')
+    if i then return job(i, 'plant', cfg.plantSeconds, 'Planting ' .. crop) end
+    i = pickPlot(c, s, w.id, 'tend')
+    if i then return job(i, 'tend', cfg.tendSeconds, 'Tending the ' .. crop) end
+    return idleTask(c, 'Waiting for the ' .. crop .. ' to grow', 15, s.id)
+end
+
 local function gatherTask(c, w, s, speed)
     local d = def(s)
+    if d.crops then return farmTask(c, w, s, speed) end
     local res, amount = next(d.output)
     if storageFull(c, res) then
         s.stalled = 'no room in the storehouse'
         return idleTask(c, 'No room for more ' .. resName(res), 15, s.id)
+    end
+    if fellsTrees(c, s) then
+        local t = pickTree(c, s, w.id)
+        if not t then
+            s.stalled = 'waiting for the trees to grow back'
+            return idleTask(c, 'Waiting for the trees to grow back', 20, s.id)
+        end
+        s.stalled = nil
+        return {
+            kind = 'gather', site = s.id, tree = t.id, label = d.job,
+            steps = {
+                step('goto', { to = s.id, tree = t.id, label = 'Walking to a tree' }),
+                step('work', {
+                    at = s.id, tree = t.id, duration = d.cycle / speed, tool = d.tool,
+                    effect = 'produce', res = res, amount = amount, label = 'Felling a tree',
+                }),
+                step('goto', { to = storeId(c), label = 'Carrying ' .. resName(res) .. ' to the storehouse' }),
+                step('store', { label = 'Storing ' .. resName(res) }),
+            },
+        }
     end
     s.stalled = nil
     return {
@@ -1018,7 +1400,7 @@ end
 local function producerOf(c, res)
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
-        if s.built and def(s).output and def(s).output[res] then return s end
+        if s.built and def(s).output and def(s).output[res] and not outOfTrees(c, s) and not outOfCrops(c, s) then return s end
     end
 end
 C.producerOf = producerOf
@@ -1036,14 +1418,21 @@ end
 local function helperGather(c, p, speed, site, need)
     local d = def(p)
     local res, amount = next(d.output)
+    local tree = fellsTrees(c, p) and pickTree(c, p)
+    -- on a farm: a ripe plot to harvest (producerOf only offers one that has one)
+    local plot = growsCrops(p) and pickPlot(c, p, nil, 'ripe') or nil
+    if plot then amount = defs.crops.yield end
     local task = {
-        kind = 'gather', site = p.id, helper = true,
+        kind = 'gather', site = p.id, helper = true, tree = tree and tree.id or nil, plot = plot,
         steps = {
-            step('goto', { to = p.id, label = 'Walking to the ' .. d.name }),
+            step('goto', { to = p.id, tree = tree and tree.id or nil, plot = plot, label = tree and 'Walking to a tree' or ('Walking to the ' .. d.name) }),
             step('work', {
-                at = p.id, duration = d.cycle / speed, tool = d.tool,
-                effect = 'produce', res = res, amount = amount,
-                label = 'Helping out: ' .. d.job .. ' at the ' .. d.name,
+                at = p.id, tree = tree and tree.id or nil, plot = plot,
+                duration = (plot and defs.crops.harvestSeconds or d.cycle) / speed, tool = d.tool,
+                effect = plot and 'harvest' or 'produce', res = res, amount = amount,
+                label = (tree and 'Helping out: felling a tree')
+                    or (plot and 'Helping out: harvesting ' .. (defs.look(p.kind, p.variant).cropName or 'crops'))
+                    or ('Helping out: ' .. d.job .. ' at the ' .. d.name),
             }),
         },
     }
@@ -1428,6 +1817,12 @@ local function applyStep(c, w, st)
     elseif st.op == 'work' then
         if st.effect == 'produce' or st.effect == 'convert' then
             w.carry = { res = st.res, amount = st.amount }
+            if st.tree then chopTree(c, st.tree, st.amount) end
+        elseif st.effect == 'harvest' then
+            -- (if somebody beat them to it, there's nothing to carry)
+            if workPlot(c, c.sites[st.at], st.plot, 'harvest') then w.carry = { res = st.res, amount = st.amount } end
+        elseif st.effect == 'plant' or st.effect == 'tend' then
+            workPlot(c, c.sites[st.at], st.plot, st.effect)
         elseif st.effect == 'build' then
             local s = c.sites[st.at]
             if s then addBuildProgress(c, s, st.amount) end
@@ -1507,6 +1902,8 @@ function C.tick(c, dt, hours, skipping)
     end
 
     tickTrade(c, hours)
+    growTrees(c, hours)
+    growCrops(c, hours)
 
     if c.storehouse then
         c.arrivalTimer = c.arrivalTimer + hours
@@ -1552,6 +1949,15 @@ function C.simulateWorker(c, wid, dt, anyTime)
         end
         return
     end
+    if s and growsCrops(s) then
+        local cycle = def(s).cycle + 2 * C.tripSeconds(c, s.id)
+        w.abstractProgress = w.abstractProgress + dt * speed / cycle
+        while w.abstractProgress >= 1 do
+            w.abstractProgress = w.abstractProgress - 1
+            farmRound(c, s, wid)
+        end
+        return
+    end
     if s then
         local d = def(s)
         local cycle = d.cycle + 2 * C.tripSeconds(c, s.id)
@@ -1572,6 +1978,17 @@ function C.simulateWorker(c, wid, dt, anyTime)
                 end
                 c.stock[inRes] = c.stock[inRes] - inAmount
                 s.stalled = nil
+            end
+            if fellsTrees(c, s) then
+                local t = pickTree(c, s, wid)
+                if not t then
+                    s.stalled = 'waiting for the trees to grow back'
+                    w.abstractProgress = 0
+                    break
+                end
+                s.stalled = nil
+                local _, made = next(d.output)
+                chopTree(c, t.id, made)
             end
             for res, n in pairs(d.output) do c.stock[res] = c.stock[res] + n end
         end
@@ -1723,6 +2140,17 @@ function C.siteStatus(c, sid)
     if d.job then
         local n = #C.assignedTo(c, sid)
         local txt = string.format('%d/%d %ss', n, d.slots, d.job)
+        if fellsTrees(c, s) then
+            local t = C.campTrees(c, sid)
+            txt = txt .. string.format(', trees: %d to fell', t.ready)
+            if t.growing > 0 then txt = txt .. ', ' .. t.growing .. ' growing' end
+            if t.felled > 0 then txt = txt .. ', ' .. t.felled .. ' felled' end
+        elseif d.fells then
+            txt = txt .. ', no trees nearby'
+        elseif d.crops then
+            local n = C.farmPlots(c, sid)
+            txt = txt .. string.format(', crops: %d ripe, %d growing, %d bare', n.ripe, n.growing, n.bare)
+        end
         if s.stalled then txt = txt .. ' - ' .. s.stalled end
         return txt
     end

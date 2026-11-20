@@ -64,6 +64,18 @@ test('one farmer feeds a handful of settlers, not a whole town', function()
     assert(hungry(c, ids) > 0, 'and go hungry')
 end)
 
+test('a farmer makes about 60 Food a day; a full farm of three, about 150', function()
+    -- one day from an almost empty storehouse (it holds 150); each farmer eats
+    -- about 9 of it
+    local _, gained = run({ farm = 1 }, 0, 1, { food = 10 })
+    local one = gained.food + 9
+    assert(one >= 45 and one <= 75, 'one farmer, a day: ' .. one)
+    _, gained = run({ farm = 3 }, 0, 1, { food = 10 })
+    local three = gained.food + 27
+    assert(three >= 120 and three <= 180, 'three farmers, a day: ' .. three)
+    assert(three < one * 3, 'the field is the limit for a third')
+end)
+
 test('a woodcutter takes about a working day for a house worth of timber', function()
     local _, gained = run({ lumber = 1 }, 0, 1, { food = 100 })
     -- a house with three bedrolls added: room for four

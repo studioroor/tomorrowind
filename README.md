@@ -80,8 +80,8 @@ Lua), and every settler is a unique Dunmer with their own name and face. The
 
 | Building | Cost | Does |
 |---|---|---|
-| Woodcutter's Camp | free | 3 woodcutters, each about 75 Timber a day |
-| Farm | 10 Timber | 3 farmers, each about 60 Food a day (feeds about 5). Grow saltrice, wickwheat, marshmerrow, ash yam or hackle-lo, or keep kwama: pick with Left/Right while placing |
+| Woodcutter's Camp | free, by a tree | 3 woodcutters, each about 75 Timber a day, felling the trees around it |
+| Farm | 10 Timber | 3 farmers: one makes about 60 Food a day (feeds about 5), a full farm about 150. Grow saltrice, wickwheat, marshmerrow, ash yam or hackle-lo, or keep kwama: pick with Left/Right while placing |
 | Ore Vein | 16 Timber | 3 miners, each about 70 Raw Ore a day |
 | Smelter | 20 Timber, 8 Ore | 2 smelters, each about 25 Iron Ingots a day from 50 Ore |
 | Warehouse | 30 Timber | stores 150 more of everything |
@@ -137,6 +137,49 @@ part of the day, so layout matters. `tests/test_economy.lua` checks this balance
   simulated at the same rates, during their working hours, and you get a
   summary when you come back.
 
+### Trees
+
+A **Woodcutter's Camp** has to stand by a tree (within about 1000 units). Its
+woodcutters walk out to the trees around it, the game's own or ones you
+planted, and fell them where they stand.
+
+- A tree holds 40 Timber. When the last of it is cut the tree **comes down**,
+  toppling away from the woodcutter, and leaves a stump.
+- Half a day later the stump **sprouts**, and the sapling grows back to full
+  size in two days. A handful of trees keeps one woodcutter busy: more
+  woodcutters need more trees, so plant some. The camp's overview shows how many of its trees are ready,
+  growing or felled; with none left to fell, the woodcutters wait.
+- **Plant** trees from the **Nature** part of the Furnish tab: a single
+  **Tree**, or a **Grove** of five saplings in a loose ring, for wood or just
+  for looks. A builder plants them; Left/Right picks the kind (Ascadian Isles,
+  West Gash, Bitter Coast, Grazelands, Azura's Coast), and the kind that grows
+  around your colony comes first.
+- Colonies from before trees counted find the trees around them when loaded.
+  A camp with no trees around at all keeps working at its stump.
+
+The numbers are in `defs.trees`; `tests/test_trees.lua` checks the rules.
+
+### Crops
+
+A **Farm**'s field is 24 plots, and each one goes round: planted, tended,
+harvested, planted again.
+
+- Farmers **harvest** a ripe plot (the plant goes) and carry the food to the
+  storehouse, **plant** a bare one (a sprout comes up), and otherwise **tend**
+  the growing ones, a plot at a time.
+- Crops take about 4 game hours to ripen on their own, and tending makes them
+  grow faster. Neglected crops only grow slower: nothing dies. They grow at
+  night too, but nobody plants or harvests until morning.
+- A new farm starts with a mixed field, a few plots ripe already, so the food
+  comes in straight away.
+- A **Kwama Nest** has no planting: the kwama lay their eggs again by
+  themselves, and the farmers gather and tend.
+- The farm's overview shows the field ("crops: 6 ripe, 12 growing, 6 bare").
+  With the storehouse full the harvest waits, but the field is still kept.
+- Farms from older saves get a field like a new farm's when loaded.
+
+The numbers are in `defs.crops`; `tests/test_crops.lua` checks the rules.
+
 ### The day
 
 | Hours | |
@@ -163,7 +206,7 @@ they are.
 
 The **Furnish** tab of the ledger has the small things that make a colony a
 home: campfires, lamp posts, paper lanterns, chairs, benches, tables,
-bookshelves, chests, bedrolls, beds, tents, shelters, a pavilion, fences, stone walls and gates.
+bookshelves, chests, bedrolls, beds, tents, shelters, fences, stone walls and gates.
 Laborers and builders make them like anything else, and removing one (look at
 it and press **Delete**) gives its materials back.
 
@@ -176,9 +219,9 @@ it and press **Delete**) gives its materials back.
 - **Tents** can be walked into, and you can place furniture inside.
 - **Shelters** are open hide canopies on poles, like those of Ashlander camps
   and Dunmer markets: a roof over a table, beds or a workplace, open to every
-  side. The **Pavilion** is a big open tent on a deck.
+  side.
 - **Chests** are real containers. Removing one hands you what's in it.
-- The tab has four parts: **Furniture**, **Lights**, **Decor** and **Structures**.
+- The tab has five parts: **Furniture**, **Lights**, **Decor**, **Structures** and **Nature** (trees and groves to plant, see Trees).
 - **Stairs, walkways and rope bridges** go on any surface you aim at, roofs
   included. Walkways and bridges start where you aim and run forward, and
   walkway planks snap together at the same height, so you can span from roof
@@ -319,6 +362,14 @@ TEST_CONTENT=tent.omwscripts     tools/playtest.sh .playtest/tent  # doorway ray
 TEST_CONTENT=gallery.omwscripts  tools/playtest.sh .playtest/gal   # look at vanilla models
 TEST_CONTENT=probe.omwscripts    tools/playtest.sh .playtest/probe # measure model sizes
 TEST_CONTENT=probe_map.omwscripts tools/playtest.sh .playtest/map Pelagiad # map trees and rocks
+TEST_CONTENT=trees.omwscripts SHOTS="" tools/playtest.sh .playtest/trees Pelagiad # felling, regrowth, a grove
+TEST_CONTENT=crops.omwscripts SHOTS="" tools/playtest.sh .playtest/crops Pelagiad # harvest, planting, tending, regrowth
+tools/make_timelapse.sh .playtest/tl     # a village going up, as a looping GIF
+TEST_CONTENT=ambient_scout.omwscripts SHOTS="" tools/playtest.sh .playtest/scout Pelagiad
+tools/ambient_scout.py .playtest/scout   # the candidate cameras, and a map of where settlers walk
+tools/film_ambient.sh .playtest/amb      # a living colony along the road, from the chosen cameras
+tools/make_ambient.py .playtest/amb      # ... cut into seamless loops and stills (trailer/ambient)
+tools/make_banners.py <still.jpg>       # banner, social preview, square (art/)
 ```
 
 The trailer is made here too: `tools/film_trailer.sh .playtest/take` films it

@@ -24,7 +24,7 @@ local SITE_INTERVAL = 1 / 30
 -- persistent
 local c                      -- colony state (plain table, see core/colony.lua)
 local objs = { sites = {}, workers = {}, decor = {}, threats = {}, sitefx = {}, workfx = {}, indoors = {},
-    shells = {}, exits = {}, doors = {}, caravan = {}, inRoom = {} }
+    shells = {}, exits = {}, doors = {}, caravan = {}, inRoom = {}, trees = {}, stumps = {}, felling = {}, crops = {} }
 local ghost                  -- { obj=, kind= } while the player is placing
 local recIds                 -- ids of our runtime records (see records.lua)
 
@@ -228,6 +228,10 @@ local function removeDecor(sid)
         if o:isValid() then o:remove() end
     end
     objs.decor[sid] = nil
+    for _, o in pairs(objs.crops[sid] or {}) do
+        if o:isValid() then o:remove() end
+    end
+    objs.crops[sid] = nil
 end
 
 -- Timber pilings around the footprint wherever the ground drops away
@@ -456,6 +460,69 @@ local function updateWorkFx()
     end
 end
 
+---------------------------------------------------------------------------
+-- crops: a farm's plots (c.sites[sid].plots, see the core) each have a plant
+-- while something grows there; objs.crops[sid][i] is plot i's.
+
+-- Where plot i of a farm is, on the ground.
+local function plotPos(sid, i)
+    local s = c.sites[sid]
+    local x, y = C.plotOffset(i)
+    local p = v3(s.pos) + util.transform.rotateZ(s.yaw) * util.vector3(x, y, 0)
+    return util.vector3(p.x, p.y, landHeight(p) or s.pos.z)
+end
+
+-- A plant's size: from a sprout to the ripe crop, in steps (a new size
+-- costs a little).
+local function cropScale(s, grow)
+    local full = defs.look(s.kind, s.variant).cropScale or 1
+    return full * math.max(0.12, math.floor(grow * 20 + 0.5) / 20)
+end
+
+-- Plot i's plant as the field says: none when bare, sized as it's grown.
+--   force: set its size even if it looks right (saves clamp sizes)
+local function syncPlot(sid, i, force)
+    local s = c.sites[sid]
+    local p = s and s.built and s.plots and s.plots[i]
+    -- a farm on the move has its field taken up until it's put down again
+    if s and s.moving and not objs.crops[sid] then return end
+    local list = objs.crops[sid] or {}
+    objs.crops[sid] = list
+    local o = list[i]
+    if o and not o:isValid() then o, list[i] = nil, nil end
+    if not p or not p.grow then
+        if o then o:remove() end
+        list[i] = nil
+        return
+    end
+    local want = cropScale(s, p.grow)
+    if not o then
+        local d = defs.look(s.kind, s.variant)
+        local ok, made = pcall(world.createObject, rec().decor[d.crop or 'saltrice'])
+        if not ok then return end
+        made:teleport('', plotPos(sid, i), { rotation = util.transform.rotateZ(s.yaw + i * 2.4) })
+        made:setScale(want)
+        list[i] = made
+    elseif force or math.abs(o.scale - want) > 0.01 then
+        o:setScale(want)
+    end
+end
+
+local function syncField(sid, force)
+    local s = c.sites[sid]
+    if not (s and s.built and defs.buildings[s.kind].crops) then return end
+    C.plotsOf(s)
+    for i = 1, C.plotCount() do syncPlot(sid, i, force) end
+end
+
+local cropSyncT = 0
+local function syncCrops(dt, force)
+    cropSyncT = cropSyncT - dt
+    if not force and cropSyncT > 0 then return end
+    cropSyncT = 2
+    for _, sid in ipairs(c.siteOrder) do syncField(sid, force) end
+end
+
 local function spawnDecor(sid)
     local s = c.sites[sid]
     local d = defs.look(s.kind, s.variant)
@@ -518,19 +585,7 @@ local function spawnDecor(sid)
         end
         return
     end
-    if d.decor ~= 'farm' then return end
-    local rot = util.transform.rotateZ(s.yaw)
-    for ix = -2, 2 do
-        for iy = -2, 2 do
-            if not (ix == 0 and iy == 0) then
-                local p = v3(s.pos) + rot * util.vector3(ix * 110, iy * 110, 0)
-                local o = world.createObject(rec().decor[d.crop or 'saltrice'])
-                o:teleport('', util.vector3(p.x, p.y, landHeight(p) or p.z), { rotation = util.transform.rotateZ(math.random() * 6.28) })
-                if d.cropScale then o:setScale(d.cropScale) end
-                list[#list + 1] = o
-            end
-        end
-    end
+    if d.decor == 'farm' then syncField(sid, true) end
 end
 
 local furnishHouse, arrivalPoint -- defined with the interiors
@@ -542,8 +597,9 @@ local function setSiteObject(sid)
     local d = defs.look(s.kind, s.variant)
     local recordId = (s.built and lookRecord(s.kind, s.variant))
         or (d.small and rec().constructionSmall) or rec().construction
-    -- leveled sites have their floor worked out; everything else sits on the land
-    if not s.leveled then s.pos.z = landHeight(v3(s.pos)) or s.pos.z end
+    -- leveled sites have their floor worked out; everything else sits on the
+    -- land (trees to plant always do: older saves may have them raised)
+    if not s.leveled or defs.buildings[s.kind].plants then s.pos.z = landHeight(v3(s.pos)) or s.pos.z end
     objs.sites[sid] = placeObject(recordId, objectPos(sid), s.yaw, siteScale(sid), siteCell(sid))
     removeDecor(sid)
     if s.goods then
@@ -556,6 +612,254 @@ local function setSiteObject(sid)
         syncSiteFx(sid)
     end
     rebuildIndex()
+end
+
+---------------------------------------------------------------------------
+-- trees: the game's own around the colony, and the ones planted (the core
+-- keeps them in c.trees; objs.trees has their objects)
+
+local TREE_SCAN_RADIUS = 7600 -- placement reaches 7000 from the storehouse
+local FALL_SECONDS, LIE_SECONDS = 1.8, 2.5
+local falling = {}            -- tid -> { obj=, axis=, rot=, pos=, pivot=, t= } (runtime: a felled tree coming down)
+local treeSyncT = 0
+local footPending = {}        -- tid -> true: its size changed, its foot gets set on the ground next
+
+local function isTreeRecord(id)
+    id = id:lower()
+    return id:find('tree') ~= nil and not id:find('stump') and not id:find('branch') and not id:find('parts')
+end
+
+local function treeScale(t)
+    local grow = t.felled and 0 or t.grow
+    return (t.scale0 or 1) * (t.size or 1) * grow
+end
+
+-- What grows around here most: planted first (see defs, the trees to plant).
+local function mostCommon(counts)
+    local best, bestN
+    for id, n in pairs(counts) do
+        if not bestN or n > bestN or (n == bestN and id < best) then best, bestN = id, n end
+    end
+    return best
+end
+
+-- The Static record a planting of this kind and variant puts in the ground.
+local function plantRecord(kind, variant)
+    return defs.look(kind, variant).tree or (c and c.localTree) or defs.treeKinds[1].tree
+end
+
+-- Once per colony: the game's own trees around the storehouse become the
+-- colony's (cells are 8192 across, so the storehouse's and its neighbours').
+local function scanTrees()
+    if not c or c.treesScanned or not c.storehouse then return end
+    local store = v3(c.sites[c.storehouse].pos)
+    local gx, gy = math.floor(store.x / 8192), math.floor(store.y / 8192)
+    local counts, n = {}, 0
+    objs.trees = objs.trees or {}
+    for dx = -1, 1 do
+        for dy = -1, 1 do
+            local okCell, cell = pcall(world.getExteriorCell, gx + dx, gy + dy)
+            local okAll, list = false, nil
+            if okCell and cell then okAll, list = pcall(cell.getAll, cell, types.Static) end
+            for _, o in ipairs(okAll and list or {}) do
+                if o.enabled and isTreeRecord(o.recordId) then
+                    local p = o.position
+                    if util.vector2(p.x - store.x, p.y - store.y):length() <= TREE_SCAN_RADIUS then
+                        local t = C.addTree(c, { pos = plain(p), model = o.recordId })
+                        t.scale0 = o.scale
+                        -- how deep its roots go: the models' origins sit about
+                        -- mid-tree, so a tree is placed by the bottom of its box
+                        local okBox, box = pcall(o.getBoundingBox, o)
+                        local ground = landHeight(p)
+                        if okBox and box and ground and box.halfSize.z > 1 then
+                            local bottom = box.center.z - box.halfSize.z
+                            local sink = ground - bottom
+                            if sink >= 0 and sink < 400 then t.sink = sink end
+                            t.footOff = (p.z - bottom) / o.scale
+                            c.treeFoot = c.treeFoot or {}
+                            c.treeFoot[o.recordId] = c.treeFoot[o.recordId] or t.footOff
+                        end
+                        objs.trees[t.id] = o
+                        counts[o.recordId] = (counts[o.recordId] or 0) + 1
+                        n = n + 1
+                    end
+                end
+            end
+        end
+    end
+    c.treesScanned = true
+    c.localTree = mostCommon(counts)
+    log('trees around the colony:', n, 'most of them', tostring(c.localTree))
+end
+
+-- A planted tree's object, a sapling at first.
+local function spawnTree(tid)
+    local t = C.tree(c, tid)
+    local ground = landHeight(v3(t.pos)) or t.pos.z
+    t.pos.z = ground
+    local o = world.createObject(t.model)
+    objs.trees[tid] = o
+    local foot = t.footOff or (c.treeFoot and c.treeFoot[t.model])
+    if foot then
+        t.footOff = foot
+        o:teleport(landCell() or '', util.vector3(t.pos.x, t.pos.y, ground), { rotation = util.transform.rotateZ(t.yaw or 0) })
+        o:setScale(math.max(0.05, treeScale(t)))
+        footPending[tid] = 'place'
+    else
+        -- a kind that doesn't grow around here: measured once at full size,
+        -- out of sight under the ground (the model's origin is mid-tree)
+        o:teleport(landCell() or '', util.vector3(t.pos.x, t.pos.y, ground - 6000), { rotation = util.transform.rotateZ(t.yaw or 0) })
+        footPending[tid] = 'measure'
+    end
+    treeSyncT = math.min(treeSyncT, 0.2)
+end
+
+-- Puts a growing tree (planted, or sprouted again) on its foot: the bottom
+-- of the tree its roots' depth into the ground (as deep as the game's own
+-- trees, less while it's small). Worked out from its size, not from its box:
+-- a box only catches up with a new size a while later.
+local function setOnFoot(t, o)
+    local mode = footPending[t.id]
+    if mode == 'measure' then
+        local ok, box = pcall(o.getBoundingBox, o)
+        if not ok or not box or box.halfSize.z <= 1 then return false end
+        t.footOff = (o.position.z - (box.center.z - box.halfSize.z)) / o.scale
+        c.treeFoot = c.treeFoot or {}
+        c.treeFoot[t.model] = c.treeFoot[t.model] or t.footOff
+        o:setScale(math.max(0.05, treeScale(t)))
+    end
+    local ground = landHeight(o.position)
+    if not ground then return false end
+    local foot = t.footOff or (c.treeFoot and c.treeFoot[t.model]) or 450
+    local z = ground - (t.sink or defs.trees.sink) * t.grow + foot * math.max(0.05, treeScale(t))
+    if math.abs(o.position.z - z) > 1 then
+        pcall(o.teleport, o, o.cell, util.vector3(o.position.x, o.position.y, z), { rotation = o.rotation })
+    end
+    return true
+end
+
+-- Felled: a copy of the tree topples over (away from whoever cut it), the
+-- tree itself is hidden and a stump is left.
+local function fellTree(tid)
+    local t = C.tree(c, tid)
+    local o = objs.trees[tid]
+    if not o or not o:isValid() then return end
+    local away = util.vector3(math.random() - 0.5, math.random() - 0.5, 0)
+    for _, wid in ipairs(c.workerOrder) do
+        local task = c.workers[wid].task
+        local wo = objs.workers[wid]
+        if task and task.tree == tid and wo and wo:isValid() then away = o.position - wo.position break end
+    end
+    away = util.vector3(away.x, away.y, 0)
+    if away:length() < 1 then away = util.vector3(1, 0, 0) end
+    away = away:normalize()
+    local ok, copy = pcall(world.createObject, o.recordId)
+    if ok then
+        copy:teleport(o.cell, o.position, { rotation = o.rotation })
+        copy:setScale(o.scale)
+        -- tipping over about the foot of the trunk, on the ground (the
+        -- model's origin is mid-tree), around the horizontal axis across the fall
+        local pivot = util.vector3(t.pos.x, t.pos.y, landHeight(v3(t.pos)) or o.position.z)
+        falling[tid] = { obj = copy, axis = util.vector3(-away.y, away.x, 0), rot = o.rotation, pos = o.position,
+            pivot = pivot, away = away, t = 0 }
+        objs.felling = objs.felling or {}
+        objs.felling[tid] = copy
+        pcall(core.sound.playSound3d, 'Body Fall Large', copy, { pitch = 0.6, volume = 1 })
+    end
+    o.enabled = false
+    objs.stumps = objs.stumps or {}
+    local okS, stump = pcall(world.createObject, defs.trees.stump)
+    if okS then
+        stump:teleport(o.cell, util.vector3(t.pos.x, t.pos.y, landHeight(v3(t.pos)) or t.pos.z), { rotation = util.transform.rotateZ(math.random() * 6.28) })
+        stump:setScale(math.min(2, math.max(0.5, (t.scale0 or 1) * (t.size or 1) * defs.trees.stumpScale)))
+        objs.stumps[tid] = stump
+    end
+end
+
+local function updateFalling(dt)
+    for tid, f in pairs(falling) do
+        f.t = f.t + dt
+        local o = f.obj
+        if not o:isValid() then
+            falling[tid] = nil
+        elseif f.t >= FALL_SECONDS + LIE_SECONDS then
+            o:remove()
+            falling[tid] = nil
+            if objs.felling then objs.felling[tid] = nil end
+        elseif f.t <= FALL_SECONDS + 0.1 then
+            -- slowly at first, then faster: falling
+            local u = math.min(1, f.t / FALL_SECONDS)
+            local angle = (math.pi / 2 - 0.03) * u * u
+            local turn = util.transform.rotate(angle, f.axis)
+            pcall(o.teleport, o, o.cell, f.pivot + turn * (f.pos - f.pivot), { rotation = turn * f.rot })
+            if u >= 1 and not f.thud then
+                f.thud = true
+                pcall(core.sound.playSound3d, 'Body Fall Large', o, { pitch = 0.5, volume = 1 })
+                if debugOn then
+                    -- which way it came down, against which way it should
+                    local okB, box = pcall(o.getBoundingBox, o)
+                    if okB and box then
+                        local d = box.center - f.pivot
+                        log(string.format('tree down: top towards (%.2f, %.2f), meant (%.2f, %.2f), box z=[%.0f, %.0f] pivot z=%.0f',
+                            d.x / math.max(1, d:length()), d.y / math.max(1, d:length()), f.away.x, f.away.y,
+                            box.center.z - box.halfSize.z, box.center.z + box.halfSize.z, f.pivot.z))
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- A stump sprouts: the tree is back, small.
+local function sproutTree(tid)
+    local stump = objs.stumps and objs.stumps[tid]
+    if stump and stump:isValid() then stump:remove() end
+    if objs.stumps then objs.stumps[tid] = nil end
+    local o = objs.trees[tid]
+    local t = C.tree(c, tid)
+    if o and o:isValid() then
+        o.enabled = true
+        o:setScale(math.max(0.05, treeScale(t)))
+        -- small, it would hang in the air from its mid-tree origin
+        t.regrown = true
+        footPending[tid] = 'place'
+        setOnFoot(t, o)
+        footPending[tid] = nil
+    end
+end
+
+-- Growing trees get their size (saves also clamp scales to 0.5..2, so
+-- every tree is set again after loading).
+local function syncTrees(dt, all)
+    treeSyncT = treeSyncT - dt
+    if not all and treeSyncT > 0 then return end
+    treeSyncT = 2
+    for _, t in ipairs(C.treeList(c)) do
+        local o = objs.trees and objs.trees[t.id]
+        if o and o:isValid() and not t.felled then
+            if footPending[t.id] and setOnFoot(t, o) then footPending[t.id] = nil end
+            if (all or t.grow < 1) and footPending[t.id] ~= 'measure' then
+                local want = math.max(0.05, treeScale(t))
+                if all or math.abs(o.scale - want) > 0.002 then
+                    o:setScale(want)
+                    if t.planted or t.regrown then
+                        footPending[t.id] = 'place'
+                        setOnFoot(t, o)
+                        footPending[t.id] = nil
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Where a woodcutter stands to fell a tree, and what they face.
+local function treeTarget(tid)
+    local t = C.tree(c, tid)
+    local o = objs.trees and objs.trees[tid]
+    if not t then return nil end
+    local z = (o and o:isValid() and o.position.z) or landHeight(v3(t.pos)) or t.pos.z
+    return util.vector3(t.pos.x, t.pos.y, z), o
 end
 
 ---------------------------------------------------------------------------
@@ -690,6 +994,17 @@ local function sendStep(wid, moveTo)
             local from, to = tentAround(moveTo or o.position), tentAround(msg.center)
             msg.via, msg.inside = tentRoute(from, to)
         end
+    end
+    local treePos, treeObj
+    if st.tree then treePos, treeObj = treeTarget(st.tree) end
+    if treePos then
+        -- felling a tree: right up to its trunk (the worker measures it)
+        msg.center, msg.standoff, msg.slotAngle, msg.trunk = treePos, 70, 0, treeObj
+        msg.via, msg.inside = nil, nil
+    elseif st.plot and s and s.plots then
+        -- on the field: at the plant (or where it goes)
+        msg.center, msg.standoff, msg.slotAngle = plotPos(sid, st.plot), defs.crops.standoff, 0
+        msg.via, msg.inside = nil, nil
     end
 
     if st.op == 'work' and s then
@@ -1148,7 +1463,10 @@ end
 
 local function processEvents()
     for _, e in ipairs(C.drainEvents(c)) do
-        if e.kind == 'alarm' or e.kind == 'all_clear' then
+        local gone = e.site and not c.sites[e.site] and e.kind ~= 'site_removed'
+        if gone then
+            -- e.g. a planting placed and finished at once: its trees are what's left
+        elseif e.kind == 'alarm' or e.kind == 'all_clear' then
             replanAll()
             log(e.kind)
         elseif e.kind == 'arrival' then
@@ -1211,6 +1529,14 @@ local function processEvents()
             if fire and fire:isValid() then fire:remove() end
             objs.workfx[e.site] = nil
             rebuildIndex()
+        elseif e.kind == 'tree_planted' then
+            spawnTree(e.tree)
+        elseif e.kind == 'tree_felled' then
+            fellTree(e.tree)
+        elseif e.kind == 'tree_sprouted' then
+            sproutTree(e.tree)
+        elseif e.kind == 'plot' then
+            syncPlot(e.site, e.plot)
         elseif e.kind == 'msg' then
             message(e.text)
         end
@@ -1265,6 +1591,11 @@ local function snapshot()
     end
     for _, opt in ipairs(C.assignmentOptions(c)) do
         snap.options[#snap.options + 1] = { id = opt, label = C.assignmentLabel(c, opt) }
+    end
+    -- where the trees are, for placing a Woodcutter's Camp
+    snap.trees = {}
+    for i, t in ipairs(C.treeList(c)) do
+        snap.trees[i] = { pos = { x = t.pos.x, y = t.pos.y }, felled = t.felled }
     end
     return snap
 end
@@ -1442,13 +1773,72 @@ local function addBoard()
     setSiteObject(s.id)
 end
 
+-- Older saves: sites of a kind the mod no longer has (the pavilion) go, and
+-- what was put into them comes back to the storehouse. Their data goes at
+-- once on loading (everything else expects every site to have a kind); their
+-- objects on the first update, in migrateSites.
+local retired = {}
+local function retireSites()
+    for i = #c.siteOrder, 1, -1 do
+        local sid = c.siteOrder[i]
+        local s = c.sites[sid]
+        if not defs.buildings[s.kind] then
+            for res, total in pairs(s.cost or {}) do
+                local back = s.built and total or (total - (s.needs and s.needs[res] or 0))
+                if back > 0 then c.stock[res] = (c.stock[res] or 0) + back end
+            end
+            for _, wid in ipairs(c.workerOrder) do
+                local w = c.workers[wid]
+                if w.assignment == sid then w.assignment = nil end
+                if w.bed == sid then w.bed = nil end
+            end
+            table.remove(c.siteOrder, i)
+            c.sites[sid] = nil
+            retired[#retired + 1] = { sid = sid, kind = s.kind }
+        end
+    end
+end
+
 -- Older saves: buildings whose model changed get their new look.
 local function migrateSites()
+    for _, r in ipairs(retired) do
+        local o = objs.sites[r.sid]
+        if o and o:isValid() then pcall(o.remove, o) end
+        objs.sites[r.sid] = nil
+        removeDecor(r.sid)
+        removeSiteFx(r.sid)
+        log('removed a retired', r.kind, r.sid)
+        message('The ' .. r.kind .. ' is no longer part of Tomorrowind: it was taken down and its materials went back to the storehouse.')
+    end
+    if #retired > 0 then rebuildIndex() end
+    retired = {}
     local hasBoard = false
     for _, sid in ipairs(c.siteOrder) do
         if c.sites[sid].kind == 'board' then hasBoard = true end
     end
     if not hasBoard and c.storehouse then addBoard() end
+    scanTrees() -- colonies from before trees counted
+    -- trees scanned before their foot was measured: the untouched ones are now
+    for _, t in ipairs(C.treeList(c)) do
+        local o = objs.trees[t.id]
+        if not t.footOff and not t.felled and not t.regrown and not t.planted and o and o:isValid() then
+            local ok, box = pcall(o.getBoundingBox, o)
+            if ok and box and box.halfSize.z > 1 then
+                t.footOff = (o.position.z - (box.center.z - box.halfSize.z)) / o.scale
+                c.treeFoot = c.treeFoot or {}
+                c.treeFoot[t.model] = c.treeFoot[t.model] or t.footOff
+            end
+        end
+    end
+    syncTrees(0, true)
+    for _, sid in ipairs(c.siteOrder) do
+        local s = c.sites[sid]
+        if s.built and defs.buildings[s.kind].crops and not objs.crops[sid] then
+            -- a field from before crops grew: planted anew, plot by plot
+            setSiteObject(sid)
+        end
+    end
+    syncCrops(0, true)
     for _, sid in ipairs(c.siteOrder) do
         local s = c.sites[sid]
         if s.built and not s.host and defs.look(s.kind, s.variant).door then
@@ -1509,6 +1899,9 @@ local function onUpdate(dt)
     end
     updateSites(dt)
     processEvents()
+    updateFalling(dt)
+    syncTrees(dt)
+    syncCrops(dt)
 
     stateTimer = stateTimer + dt
     if stateTimer >= STATE_INTERVAL then
@@ -1532,6 +1925,7 @@ local function found(e)
     local s = C.found(c, plain(pos), yaw)
     setSiteObject(s.id)
     addBoard()
+    scanTrees()
     lastGameTime = world.getGameTime()
     message('You have founded a colony. Your first settlers are on their way.')
     log('colony founded at', pos)
@@ -1660,7 +2054,8 @@ local function beginPlace(e)
     removeGhost()
     local p = player()
     local look = defs.look(e.kind, e.variant)
-    local o = world.createObject(lookRecord(e.kind, e.variant))
+    -- trees to plant show as the tree itself, full grown
+    local o = world.createObject(d.plants and plantRecord(e.kind, e.variant) or lookRecord(e.kind, e.variant))
     o:teleport(p.cell, p.position + util.vector3(0, 0, -5000))
     if look.scale then o:setScale(look.scale) end
     ghost = { obj = o, kind = e.kind, variant = e.variant, moving = e.moving }
@@ -1673,12 +2068,47 @@ local function placeMove(e)
     if ghost then ghost.pending = e end
 end
 
+-- How high a tree's preview stands above the ground: its model's origin is
+-- mid-tree, so it goes up by origin-to-foot, less the roots' depth (as a
+-- planted tree does once grown). A kind that doesn't grow around here is
+-- measured once, still out of sight where it was made.
+local function ghostTreeLift()
+    local o = ghost.obj
+    local foot = ghost.footOff or (c.treeFoot and c.treeFoot[o.recordId])
+    if not foot then
+        local ok, box = pcall(o.getBoundingBox, o)
+        if not ok or not box or box.halfSize.z <= 1 then return nil end
+        foot = (o.position.z - (box.center.z - box.halfSize.z)) / o.scale
+        if foot < 0 or foot > 3000 then return nil end
+        c.treeFoot = c.treeFoot or {}
+        c.treeFoot[o.recordId] = foot
+    end
+    ghost.footOff = foot
+    return foot * o.scale - defs.trees.sink
+end
+
 applyGhostMove = function()
-    local e = ghost and ghost.pending
+    if not ghost then return end
+    local planting = defs.buildings[ghost.kind].plants
+    -- an unmeasured tree stays where it was made for a few frames
+    if planting and not ghost.footOff and ghost.obj:isValid() then
+        ghost.footOff = c.treeFoot and c.treeFoot[ghost.obj.recordId]
+        if not ghost.footOff then
+            ghost.waitFrames = (ghost.waitFrames or 4) - 1
+            if ghost.waitFrames > 0 then return end
+            -- (a box that never comes: about what the game's trees measure)
+            if not ghostTreeLift() then
+                if ghost.waitFrames > -60 then return end
+                ghost.footOff = 450
+            end
+        end
+    end
+    local e = ghost.pending
     if not e then return end
     ghost.pending = nil
     if ghost.obj:isValid() then
-        local lift = defs.look(ghost.kind, ghost.variant).lift or 0
+        local lift = planting and ghost.footOff and (ghost.footOff * ghost.obj.scale - defs.trees.sink)
+            or defs.look(ghost.kind, ghost.variant).lift or 0
         pcall(ghost.obj.teleport, ghost.obj, objs.insideHost and interiors.cell or '', e.pos + util.vector3(0, 0, lift), { rotation = util.transform.rotateZ(e.yaw or 0) })
     end
 end
@@ -1691,6 +2121,9 @@ local function placeConfirm(e)
     local look = defs.look(kind, variant)
     if not moving and look.price and C.gold(c) < look.price then
         return message(string.format('That costs %d gold; the treasury has %d.', look.price, math.floor(C.gold(c))))
+    end
+    if look.fells and not C.treeNear(C.treeList(c), e.pos, defs.trees.campReach) then
+        return message("A Woodcutter's Camp has to be near a tree.")
     end
     removeGhost()
     if moving and C.canRelocate(c, moving) then
@@ -1762,11 +2195,74 @@ local function debugCommand(e)
         for res, n in pairs(e.amounts or {}) do c.stock[res] = (c.stock[res] or 0) + n end
         if e.gold then C.deposit(c, e.gold) end
     elseif e.cmd == 'build' and c then
-        local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built, { foundation = e.foundation, variant = e.variant, host = e.host })
+        -- a planting that's done is trees, not a site
+        local planted = e.built and defs.buildings[e.kind].plants
+        local s = C.addSite(c, e.kind, plain(e.pos), e.yaw or 0, e.built and not planted, { foundation = e.foundation, variant = e.variant, host = e.host })
         s.leveled, s.radius, s.half = e.leveled, e.radius, e.half
-        if e.leveled then landscape.prepareSite(s, c) end
-        if e.built then setSiteObject(s.id) end
+        if e.leveled and not planted then landscape.prepareSite(s, c) end
+        if planted then C.finishSite(c, s.id) elseif e.built then setSiteObject(s.id) end
         processEvents()
+    elseif e.cmd == 'trees' and c then
+        -- test helper: the trees around a point (or all), and their state
+        local n, near = 0, {}
+        for _, t in ipairs(C.treeList(c)) do
+            n = n + 1
+            if e.at and util.vector2(t.pos.x - e.at.x, t.pos.y - e.at.y):length() < (e.r or 2000) then
+                if e.wood and C.treeReady(t) then t.wood = e.wood end -- fewer loads to bring it down
+                local o = objs.trees[t.id]
+                near[#near + 1] = string.format('%s %s grow=%.2f wood=%d felled=%s enabled=%s scale=%.2f', t.id, t.model,
+                    t.grow, t.wood, tostring(t.felled), tostring(o and o:isValid() and o.enabled), o and o:isValid() and o.scale or -1)
+                if o and o:isValid() then
+                    -- where the model's origin is, against its box and the ground (the pivot for felling)
+                    local ok, box = pcall(o.getBoundingBox, o)
+                    if ok and box then
+                        near[#near + 1] = string.format('    origin z=%.0f ground z=%.0f box z=[%.0f, %.0f] box centre xy off=(%.0f, %.0f)',
+                            o.position.z, landHeight(o.position) or -1, box.center.z - box.halfSize.z, box.center.z + box.halfSize.z,
+                            box.center.x - o.position.x, box.center.y - o.position.y)
+                    end
+                end
+            end
+        end
+        log('trees:', n, 'local', tostring(c.localTree))
+        for _, line in ipairs(near) do log('  ' .. line) end
+    elseif e.cmd == 'retiretest' and c then
+        -- test helper: a site of a kind the mod no longer has, as an older
+        -- save would bring it, then what loading does with it
+        c.nextId = c.nextId + 1
+        local sid = 's' .. c.nextId
+        local pos = plain(e.pos)
+        c.sites[sid] = { id = sid, kind = 'pavilion', pos = pos, yaw = 0, built = true, cost = { wood = 40 }, needs = {}, incoming = {}, progress = 24 }
+        c.siteOrder[#c.siteOrder + 1] = sid
+        local ok, o = pcall(world.createObject, 'ex_velothi_hilltent_01')
+        if ok then
+            o:teleport(landCell() or '', v3(pos))
+            objs.sites[sid] = o
+        end
+        local wood = c.stock.wood
+        retireSites()
+        log('retire test: site gone', tostring(c.sites[sid] == nil), 'wood', wood, '->', c.stock.wood)
+        needsMigration = true
+    elseif e.cmd == 'grow' and c then
+        -- test helper: hours of growth for every tree and crop at once
+        C.tick(c, 0, e.hours or 24)
+        processEvents()
+        syncTrees(0, true)
+        syncCrops(0, true)
+    elseif e.cmd == 'crops' and c then
+        -- test helper: every farm's field, and whether its plants match it
+        for _, sid in ipairs(c.siteOrder) do
+            local s = c.sites[sid]
+            if s.built and defs.buildings[s.kind].crops then
+                local n, plants, wrong = C.farmPlots(c, sid), 0, 0
+                for i, p in ipairs(C.plotsOf(s)) do
+                    local o = objs.crops[sid] and objs.crops[sid][i]
+                    local has = o and o:isValid()
+                    if has then plants = plants + 1 end
+                    if (p.grow ~= nil) ~= (has and true or false) or (has and math.abs(o.scale - cropScale(s, p.grow)) > 0.01) then wrong = wrong + 1 end
+                end
+                log(string.format('crops %s: %d ripe, %d growing, %d bare; %d plants, %d wrong', sid, n.ripe, n.growing, n.bare, plants, wrong))
+            end
+        end
     elseif e.cmd == 'tp' then
         -- move the player to look at a point (used for test screenshots)
         local p = player()
@@ -1905,6 +2401,8 @@ local function debugCommand(e)
         -- e.far) only what's named by e.prefixes (a town's buildings, say).
         -- The game's own scenery only: the colony's buildings aren't statics,
         -- and their generated record ids match no prefix.
+        -- With e.box = { x0, y0, x1, y1 }: instead of the wedge, everything in
+        -- that area named by e.prefixes (clearing ground for a village).
         local from, n = e.from, 0
         local cx, cy = math.floor(from.x / 8192), math.floor(from.y / 8192)
         local reach = math.ceil((e.far or 6000) / 8192)
@@ -1918,10 +2416,17 @@ local function debugCommand(e)
                 for _, o in ipairs(found) do
                     local dx, dy = o.position.x - from.x, o.position.y - from.y
                     local dist = math.sqrt(dx * dx + dy * dy)
-                    local off = math.atan2(math.sin(math.atan2(dx, dy) - e.yaw), math.cos(math.atan2(dx, dy) - e.yaw))
-                    if o.enabled and dist < (e.far or 6000) and math.abs(off) < (e.half or 0.9) then
+                    local off = math.atan2(math.sin(math.atan2(dx, dy) - (e.yaw or 0)), math.cos(math.atan2(dx, dy) - (e.yaw or 0)))
+                    local p, b = o.position, e.box
+                    local inside
+                    if b then
+                        inside = p.x >= b[1] and p.x <= b[3] and p.y >= b[2] and p.y <= b[4]
+                    else
+                        inside = dist < (e.far or 6000) and math.abs(off) < (e.half or 0.9)
+                    end
+                    if o.enabled and inside then
                         -- near by, all the game's scenery (the colony's own aren't statics)
-                        local hide = dist < (e.near or 1500) and o.type == types.Static
+                        local hide = not b and dist < (e.near or 1500) and o.type == types.Static
                         local id = o.recordId:lower()
                         for _, prefix in ipairs(e.prefixes or {}) do
                             if id:sub(1, #prefix) == prefix then hide = true end
@@ -2069,6 +2574,13 @@ return {
             roomDirty = next(objs.inRoom) ~= nil
             caravanTraderId = objs.caravan.trader and objs.caravan.trader:isValid() and objs.caravan.trader.id or nil
             objs.workfx = objs.workfx or {} -- fires go out on the next update
+            objs.trees, objs.stumps = objs.trees or {}, objs.stumps or {}
+            objs.crops = objs.crops or {}
+            -- a tree that was coming down when the game was saved is down now
+            for _, o in pairs(objs.felling or {}) do
+                if o:isValid() then o:remove() end
+            end
+            objs.felling, falling = {}, {}
             -- tasks don't survive a reload: everyone who was asleep indoors gets up
             for wid in pairs(objs.indoors or {}) do
                 local o = objs.workers[wid]
@@ -2084,6 +2596,7 @@ return {
             removeGhost() -- placement does not survive a reload
             tokens = {}
             if c then
+                retireSites()
                 for _, wid in ipairs(c.workerOrder) do C.cancelTask(c, wid) end
             end
             lastGameTime = nil

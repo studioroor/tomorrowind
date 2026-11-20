@@ -1,4 +1,4 @@
--- Dev-only: the open shelters and the pavilion, a bed to sleep in, and a
+-- Dev-only: the open shelters, a bed to sleep in, a campfire, and a
 -- house on stilts having its pilings driven.
 -- Run: TEST_CONTENT=shelters.omwscripts tools/playtest.sh <out>
 local core = require('openmw.core')
@@ -41,7 +41,7 @@ local function look(from, at)
 end
 local function shot(label) log('shot', label); debug.takeScreenshot() end
 
-local CANOPY, SMALL, PAVILION, HOUSE = { 700, 0 }, { 700, 650 }, { -700, 350 }, { 0, -1100 }
+local CANOPY, SMALL, FIRE, HOUSE = { 700, 0 }, { 700, 650 }, { -700, 350 }, { 0, -1100 }
 
 -- can settlers walk from outside to the middle of it?
 local function pathCheck(label, at)
@@ -85,10 +85,9 @@ return {
             once('build', 6, function()
                 dbg({ cmd = 'build', kind = 'shelter', pos = land(CANOPY[1], CANOPY[2]), yaw = 0.3, built = true })
                 dbg({ cmd = 'build', kind = 'shelter', variant = 2, pos = land(SMALL[1], SMALL[2]), yaw = -0.2, built = true })
-                dbg({ cmd = 'build', kind = 'pavilion', pos = land(PAVILION[1], PAVILION[2]), yaw = 0.5, built = true })
                 dbg({ cmd = 'build', kind = 'bed', pos = land(CANOPY[1] + 30, CANOPY[2]), yaw = 0.3, built = true })
                 dbg({ cmd = 'build', kind = 'bench', pos = land(SMALL[1], SMALL[2]), yaw = -0.2, built = true })
-                dbg({ cmd = 'build', kind = 'campfire', pos = land(PAVILION[1], PAVILION[2] + 30), built = true })
+                dbg({ cmd = 'build', kind = 'campfire', pos = land(FIRE[1], FIRE[2]), built = true })
                 -- a finished house far off, unturned, to measure
                 dbg({ cmd = 'build', kind = 'house', pos = land(3500, -2500), yaw = 0, built = true })
                 dbg({ cmd = 'spawn', n = 4 })
@@ -107,13 +106,8 @@ return {
             once('wideShot', 10.5, function() shot('shelters') end)
             once('canopy', 11.5, function() look(land(CANOPY[1] - 250, CANOPY[2] - 520, 170), land(CANOPY[1], CANOPY[2], 110)) end)
             once('canopyShot', 13, function() shot('canopy') end)
-            once('pav', 14, function() look(land(PAVILION[1] + 250, PAVILION[2] - 900, 200), land(PAVILION[1], PAVILION[2], 150)) end)
-            once('pavShot', 15.5, function() shot('pavilion') end)
-            once('pavIn', 15.7, function() look(land(PAVILION[1] - 120, PAVILION[2] - 250, 120), land(PAVILION[1] + 200, PAVILION[2] + 300, 120)) end)
-            once('pavInShot', 16.6, function() shot('in the pavilion') end)
             once('paths', 16.8, function()
                 pathCheck('canopy', CANOPY)
-                pathCheck('pavilion', PAVILION)
             end)
             -- the bed: activating it should open the rest window, with sleep
             once('bed', 17, function()

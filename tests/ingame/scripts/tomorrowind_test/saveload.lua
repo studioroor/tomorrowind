@@ -37,6 +37,8 @@ return {
                 if afterLoad > 4 and not done.d1 then
                     done.d1 = true
                     dbg({ cmd = 'fxdump' })
+                    dbg({ cmd = 'trees', at = offset(-200, 1800), r = 900 })
+                    dbg({ cmd = 'crops' })
                     for _, w in ipairs(snap.workers) do log('after load', w.name, w.status, 'enabled', w.obj.enabled) end
                     log('inside after load', tostring(snap.insideHost), self.cell.name, 'gold', snap.gold)
                     for _, w in ipairs(snap.workers) do
@@ -95,6 +97,17 @@ return {
             once('rising', 30, function() dbg({ cmd = 'build', kind = 'lumber', pos = offset(-900, -800), built = false }) end)
             once('stage', 31, function() dbg({ cmd = 'sitestate', kind = 'lumber', delivered = 1, progress = 0.5 }) end)
             once('night', 22, function() dbg({ cmd = 'hour', hour = 23 }) end)
+            -- saplings: small trees, which saves would clamp to half size
+            once('grove', 24, function() dbg({ cmd = 'build', kind = 'grove', pos = offset(-200, 1800), built = true }) end)
+            once('grovelog', 25, function() dbg({ cmd = 'trees', at = offset(-200, 1800), r = 900 }) end)
+            -- a farm: sprouts are small plants, which saves would clamp too
+            once('farm', 25.5, function()
+                dbg({ cmd = 'build', kind = 'farm', pos = offset(1500, -600), built = true })
+            end)
+            once('farmgrow', 26.5, function() dbg({ cmd = 'grow', hours = 0.1 }) end)
+            once('farmlog', 27.5, function() dbg({ cmd = 'crops' }) end) -- (sizes read back a frame later)
+            -- a pavilion from an older save (the mod no longer has them)
+            once('retire', 26, function() dbg({ cmd = 'retiretest', pos = offset(-1500, 1500) }) end)
             -- saved while inside a house, with furniture in it and gold in the treasury
             once('market', 28, function()
                 dbg({ cmd = 'give', gold = 123 })

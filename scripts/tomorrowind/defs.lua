@@ -216,9 +216,10 @@ defs.buildings = {
         founding = true, footprint = 350, storage = 150,
     },
     lumber = {
-        -- a chopping stump with a stack of logs beside it
+        -- a chopping stump with a stack of logs beside it, by the trees its
+        -- woodcutters fell (see defs.trees)
         name = "Woodcutter's Camp", model = 'meshes/f/flora_treestump_wg_02.nif', scale = 0.5,
-        cost = {}, work = 10,
+        cost = {}, work = 10, fells = true,
         job = 'Woodcutter', slots = 3, cycle = 20, output = { wood = 2 }, maxBuilders = 3,
         tool = 'axe', footprint = 250, decor = 'lumber',
         sound = { id = 'Light Armor Hit', pitch = { 0.6, 0.75 }, volume = 0.9 },
@@ -226,16 +227,18 @@ defs.buildings = {
     farm = {
         -- what grows on it is a matter of taste: all of it is food
         name = 'Farm', model = 'meshes/o/flora_saltrice_02.nif', cost = { wood = 10 }, work = 15,
+        -- its farmers plant, tend and harvest the crops plot by plot (defs.crops)
         job = 'Farmer', slots = 3, cycle = 30, output = { food = 2 }, maxBuilders = 4,
-        tool = 'hoe', footprint = 300,
-        decor = 'farm',
+        tool = 'hoe', footprint = 300, crops = true,
+        decor = 'farm', crop = 'saltrice', cropName = 'saltrice',
         variants = {
-            { label = 'Saltrice Paddy', crop = 'saltrice' },
-            { label = 'Wickwheat Field', model = 'meshes/o/flora_wickwheat_01.nif', crop = 'wickwheat' },
-            { label = 'Marshmerrow Patch', model = 'meshes/o/flora_marshmerrow_01.nif', crop = 'marshmerrow' },
-            { label = 'Ash Yam Field', model = 'meshes/o/flora_ash_yam_01.nif', crop = 'ashyam', scale = 1.8, cropScale = 1.8 },
-            { label = 'Hackle-lo Field', model = 'meshes/o/flora_hackle-lo_01.nif', crop = 'hacklelo', scale = 0.55, cropScale = 0.55 },
-            { label = 'Kwama Nest', model = 'meshes/o/contain_egg_kwama00.nif', crop = 'kwamaegg' },
+            { label = 'Saltrice Paddy', crop = 'saltrice', cropName = 'saltrice' },
+            { label = 'Wickwheat Field', model = 'meshes/o/flora_wickwheat_01.nif', crop = 'wickwheat', cropName = 'wickwheat' },
+            { label = 'Marshmerrow Patch', model = 'meshes/o/flora_marshmerrow_01.nif', crop = 'marshmerrow', cropName = 'marshmerrow' },
+            { label = 'Ash Yam Field', model = 'meshes/o/flora_ash_yam_01.nif', crop = 'ashyam', cropName = 'ash yams', scale = 1.8, cropScale = 1.8 },
+            { label = 'Hackle-lo Field', model = 'meshes/o/flora_hackle-lo_01.nif', crop = 'hacklelo', cropName = 'hackle-lo', scale = 0.55, cropScale = 0.55 },
+            -- nobody plants eggs: the kwama lay them again
+            { label = 'Kwama Nest', model = 'meshes/o/contain_egg_kwama00.nif', crop = 'kwamaegg', cropName = 'kwama eggs', selfSown = true },
         },
         sound = { id = 'Body Fall Small', pitch = { 1.2, 1.5 }, volume = 0.6 },
     },
@@ -499,12 +502,6 @@ defs.furnishOrder = {
             { label = 'Hide canopy' },
             { label = 'Small hide canopy', model = 'meshes/x/ex_de_shack_awning_02.nif', lift = 278 },
         } }),
-    -- the Velothi hill tent with its stilts in the ground: a deck under a
-    -- peaked hide roof, open at the sides (the deck's top is 31 above its
-    -- origin at full size)
-    furnishing({ key = 'pavilion', group = 'Structures', name = 'Pavilion', model = 'meshes/x/ex_velothi_hilltent_01.nif',
-        scale = 0.8, lift = -18, cost = { wood = 40 }, work = 24, hollow = true, rises = true, maxBuilders = 4,
-        desc = 'A big open tent on a deck' }),
     furnishing({ key = 'fence', group = 'Structures', name = 'Wooden Fence', model = 'meshes/x/furn_com_fence_02.nif',
         lift = 120, cost = { wood = 3 }, work = 3, segment = { half = 132 }, desc = 'Snaps to walls and fences' }),
     furnishing({ key = 'wall', group = 'Structures', name = 'Stone Wall', model = 'meshes/x/ex_drystonewall_s_01.nif',
@@ -625,8 +622,72 @@ defs.furnishOrder = {
         props = { { decor = 'boardPost', offset = { -88, 0, 130 } }, { decor = 'boardPost', offset = { 88, 0, 130 } } } }),
 }
 
+-- Trees to plant: first whatever grows most around the colony (found by the
+-- global script's tree scan: c.localTree), then the game's own trees by
+-- region. `tree` is the vanilla Static record that is planted; the preview is
+-- that tree, full grown, as it will be (`model` is only a stand-in).
+local TREES = {
+    { label = 'Ascadian Isles tree', tree = 'flora_tree_ai_05', model = 'meshes/f/flora_tree_ai_05.nif' },
+    { label = 'Ascadian Isles tree, slender', tree = 'flora_tree_ai_06', model = 'meshes/f/flora_tree_ai_06.nif' },
+    { label = 'West Gash tree', tree = 'flora_tree_wg_02', model = 'meshes/f/flora_tree_wg_02.nif' },
+    { label = 'West Gash tree, tall', tree = 'flora_tree_wg_07', model = 'meshes/f/flora_tree_wg_07.nif' },
+    { label = 'Bitter Coast tree', tree = 'flora_bc_tree_03', model = 'meshes/f/flora_bc_tree_03.nif' },
+    { label = 'Grazelands tree', tree = 'flora_tree_gl_02', model = 'meshes/f/flora_tree_gl_02.nif' },
+    { label = "Azura's Coast tree", tree = 'flora_tree_ac_01', model = 'meshes/f/flora_tree_ac_01.nif' },
+}
+local function treeVariants()
+    local list = { { label = 'Like the trees around here', tree = false } }
+    for _, t in ipairs(TREES) do list[#list + 1] = { label = t.label, tree = t.tree, model = t.model } end
+    return list
+end
+defs.treeKinds = TREES
+
+-- Planted by a builder; once in the ground it's one of the colony's trees
+-- (see defs.trees), small at first, and it grows.
+--   plants: how many saplings go in (a grove spreads them around the spot)
+defs.furnishOrder[#defs.furnishOrder + 1] = furnishing({ key = 'sapling', group = 'Nature', name = 'Tree',
+    model = TREES[1].model, tree = TREES[1].tree, cost = {}, work = 4, plants = 1, outdoor = true, footprint = 120,
+    desc = 'A sapling that grows into a tree', variants = treeVariants() })
+defs.furnishOrder[#defs.furnishOrder + 1] = furnishing({ key = 'grove', group = 'Nature', name = 'Grove',
+    model = TREES[1].model, tree = TREES[1].tree, cost = {}, work = 12, plants = 5, outdoor = true, footprint = 300,
+    maxBuilders = 3, desc = 'Five saplings: a little wood', variants = treeVariants() })
+
+-- Trees. A Woodcutter's Camp has to stand near one; its woodcutters fell
+-- the trees around it, one load at a time. A felled tree leaves a stump that
+-- sprouts again after a while, and saplings grow to full size.
+defs.trees = {
+    campReach = 1000,      -- a Woodcutter's Camp needs a tree this close
+    reach = 1800,          -- its woodcutters fell trees this far from it
+    wood = 40,             -- timber in a full-grown tree (20 loads)
+    sproutHours = 12,      -- a felled tree's stump sprouts again after this
+    growHours = 48,        -- and a sapling takes this long to grow up
+    sapling = 0.2,         -- a sapling's size, as a share of the full tree
+    groveRadius = 620,     -- a grove's saplings are spread this far out (full grown, they need the room)
+    choppersPerTree = 1,   -- woodcutters share a tree only when there's no other
+    stump = 'flora_treestump_wg_02', stumpScale = 0.55, -- left where a tree was felled
+    sink = 110,            -- how deep a planted tree's roots go at full size (the game's own: about 110)
+}
+
+-- Crops. A farm's field is a grid of plots (5 x 5 around the middle, which
+-- stays free). A plot is bare, growing or ripe: farmers harvest ripe plots
+-- (the food goes to the storehouse), plant bare ones and, with nothing else
+-- to do, tend the growing ones, which makes them grow faster. Neglected
+-- crops only grow slower. A farmer makes about 60 Food a day; with three the
+-- field itself is the limit, at about 150 (tests/test_economy.lua).
+defs.crops = {
+    grid = 5, spacing = 110, -- the plots: grid x grid, spacing apart, minus the middle
+    growHours = 4,           -- sprout to ripe, untended
+    sprout = 0.12,           -- how big a fresh planting is, as a share of a ripe crop
+    tendGrow = 0.08,         -- what one round of tending adds
+    yield = 2,               -- food from a ripe plot
+    harvestSeconds = 20,     -- the work at a plot, at normal speed
+    plantSeconds = 8,
+    tendSeconds = 10,
+    standoff = 55,           -- how close a farmer works to a plant
+}
+
 -- Held in the hand during an interaction (like carried goods).
-defs.furnishGroups = { 'Furniture', 'Lights', 'Decor', 'Structures' }
+defs.furnishGroups = { 'Furniture', 'Lights', 'Decor', 'Structures', 'Nature' }
 
 defs.propModels = {
     book = 'meshes/m/text_octavo_01.nif',

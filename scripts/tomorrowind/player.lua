@@ -396,9 +396,10 @@ startPlacing = function(kind)
         return ui.showMessage('That has to be placed outdoors.')
     end
     closeLedger()
+    local variant = 1
     placing = { kind = kind, yaw = camera.getYaw() + math.pi, valid = false, reason = 'Look at open ground', pathT = 0,
-        variant = 1, raise = 0, curve = lastCurve[kind] or 0 }
-    send('TMW_BeginPlace', { kind = kind, variant = 1 })
+        variant = variant, raise = 0, curve = lastCurve[kind] or 0 }
+    send('TMW_BeginPlace', { kind = kind, variant = variant })
 end
 
 -- Moving a building or a furnishing: place it again, as it is.
@@ -620,6 +621,9 @@ local function validate(pos, dt)
     if snap.storePos and dist2d(pos, snap.storePos) > COLONY_RADIUS then
         return false, 'too far from the storehouse'
     end
+    if d.fells and not C.treeNear(snap.trees or {}, pos, defs.trees.campReach) then
+        return false, 'needs a tree close by (or plant one)'
+    end
     for _, s in ipairs(snap.sites or {}) do
         if tooClose(d, pos, r, s) then
             return false, 'too close to the ' .. s.name
@@ -686,6 +690,8 @@ local function updatePlacing(dt)
     local limit = freePlacement and 5000 or cfg.limit
     if input.isKeyPressed(input.KEY.UpArrow) then placing.raise = math.min(limit, placing.raise + cfg.speed * fine * dt) end
     if input.isKeyPressed(input.KEY.DownArrow) then placing.raise = math.max(-limit, placing.raise - cfg.speed * fine * dt) end
+    -- a tree goes in the ground: the preview already stands on its foot
+    if defs.buildings[placing.kind].plants then placing.raise = 0 end
 
     local d = defs.look(placing.kind, placing.variant)
     local hit, normal
