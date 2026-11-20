@@ -123,6 +123,9 @@ return {
                 log('inside before save', tostring(snap.insideHost), self.cell.name, 'gold', snap.gold)
                 dbg({ cmd = 'finish' })
             end)
+            -- a house on levelled ground, as saved on OpenTW: after loading on
+            -- stock OpenMW it stands on its pilings again (fxdump: decor)
+            once('opentw', 35.5, function() dbg({ cmd = 'opentwsave', kind = 'house' }) end)
             once('before', 36, function()
                 dbg({ cmd = 'fxdump' })
                 for _, w in ipairs(snap.workers) do log('before save', w.name, w.status, 'enabled', w.obj.enabled) end

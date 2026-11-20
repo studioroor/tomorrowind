@@ -1817,6 +1817,20 @@ local function migrateSites()
         if c.sites[sid].kind == 'board' then hasBoard = true end
     end
     if not hasBoard and c.storehouse then addBoard() end
+    -- a save from OpenTW on an engine that can't change the land: the ground
+    -- under its buildings isn't levelled here, so they stand on pilings again
+    if not landscape.available() then
+        for _, sid in ipairs(c.siteOrder) do
+            local s = c.sites[sid]
+            if s.terraformed then
+                s.terraformed = nil
+                local fx = objs.sitefx[sid]
+                if fx then fx.spots = nil end
+                if s.built and not s.goods then setSiteObject(sid) end
+                log('pilings back under', sid, s.kind, '(saved on OpenTW)')
+            end
+        end
+    end
     scanTrees() -- colonies from before trees counted
     -- trees scanned before their foot was measured: the untouched ones are now
     for _, t in ipairs(C.treeList(c)) do
@@ -2484,6 +2498,17 @@ local function debugCommand(e)
                     site.needs[res] = math.floor(total * (1 - e.delivered) + 0.5)
                 end
                 site.progress = site.work * (e.progress or 0)
+            end
+        end
+    elseif e.cmd == 'opentwsave' and c then
+        -- test helper: a building as a save from OpenTW has it, its ground
+        -- levelled there, so without pilings
+        for _, sid in ipairs(c.siteOrder) do
+            local site = c.sites[sid]
+            if site.kind == e.kind and site.built and site.leveled then
+                site.terraformed = true
+                setSiteObject(sid)
+                log(string.format('as if levelled on OpenTW: %s %s, decor=%d', sid, site.kind, #(objs.decor[sid] or {})))
             end
         end
     elseif e.cmd == 'fxdump' and c then

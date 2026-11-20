@@ -68,9 +68,8 @@ return {
         onKeyPress = function(key)
             if I.UI.getMode() then return end
             if key.code == input.KEY.L then
-                if not engine then
-                    return ui.showMessage('Landscaping needs the OpenTW engine (see docs/opentw.md).')
-                end
+                -- on stock OpenMW the key does nothing: the engine isn't out yet
+                if not engine then return end
                 on = not on
                 raise = 0
                 if on then status() else ui.showMessage('Landscaping done.') end
