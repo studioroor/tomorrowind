@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Makes the README banner, the GitHub social preview and a square picture
-from an in-game still (see tests/ingame/scripts/tomorrowind_test/poster.lua
-and tools/shoot_poster.sh):
+from an in-game still: a frame of the ambient footage (tools/film_ambient.sh,
+tools/make_ambient.py, which leaves stills in trailer/ambient/stills):
 
-    tools/make_banners.py <still.png> [out-dir]      (default: art/)
+    tools/make_banners.py <still.jpg> [out-dir]      (default: art/)
 
-The still is brightened (dawn shots come out dark), cropped, and the name is
+The still is brightened, cropped, and the name is
 set over the sky in MysticCards, the Morrowind-style font that ships with
 OpenMW (SIL Open Font License). Needs Pillow and numpy, as make_trailer.py.
 """
