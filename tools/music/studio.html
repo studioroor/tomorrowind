@@ -129,6 +129,7 @@ input[type=range] { accent-color: var(--gold); }
 </main>
 <script>
 const $ = (s) => document.querySelector(s);
+const JSON_HEADERS = { 'Content-Type': 'application/json' };
 let setup, song, sel = 0, noteLen = 1;
 const LENS = [[0.5, '½'], [1, '1'], [2, '2'], [4, '4'], [8, '8']];
 const PITCH_LO = 43, PITCH_HI = 86, ROW = 13, KEYS = 44;
@@ -196,7 +197,7 @@ function bindHeader() {
     $(id).onchange = (e) => { song[key] = Math.max(+e.target.min, Math.min(+e.target.max, +e.target.value || +e.target.min)); e.target.value = song[key]; keep(); drawRoll(); };
   }
   $('#save').onclick = async () => {
-    const r = await (await fetch('/api/save', { method: 'POST', body: JSON.stringify({ song }) })).json();
+    const r = await (await fetch('/api/save', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ song }) })).json();
     if (r.error) return status(r.error, true);
     song.name = r.name; $('#name').value = r.name;
     await loadSongList(r.name);
@@ -207,7 +208,7 @@ function bindHeader() {
   $('#loop').onclick = () => { looping = !looping; $('#loop').classList.toggle('on', looping); $('#loop').setAttribute('aria-pressed', looping); if (playing) play(); };
   $('#export').onclick = async () => {
     status('Exporting…');
-    const r = await (await fetch('/api/export', { method: 'POST', body: JSON.stringify({ song, loop: looping }) })).json();
+    const r = await (await fetch('/api/export', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ song, loop: looping }) })).json();
     status(r.error ? r.error : 'Exported ' + r.path, !!r.error);
   };
   $('#clearMelody').onclick = () => { song.melody = []; keep(); drawRoll(); };
@@ -431,7 +432,7 @@ function drawTracks(openIndex) {
 // ---------------------------------------------------------------- playing
 let ctx, source, playing = false, looping = false, startAt = 0, duration = 0, rerender;
 async function render() {
-  const r = await fetch('/api/render', { method: 'POST', body: JSON.stringify({ song, loop: looping }) });
+  const r = await fetch('/api/render', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ song, loop: looping }) });
   if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'The song could not be played'); }
   ctx = ctx || new AudioContext();
   return ctx.decodeAudioData(await r.arrayBuffer());

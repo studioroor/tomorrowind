@@ -47,11 +47,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # Only this page may use the studio: other websites open in the browser
+    # could otherwise send it requests (or reach it under their own name)
+    def allowed(self, post=False):
+        hosts = ('127.0.0.1:%d' % PORT, 'localhost:%d' % PORT)
+        if self.headers.get('Host') not in hosts:
+            return False
+        if post:
+            origin = self.headers.get('Origin')
+            if origin is not None and origin not in ('http://' + h for h in hosts):
+                return False
+            # JSON can't be sent across sites without the browser asking first,
+            # and this server never says yes
+            if not (self.headers.get('Content-Type') or '').startswith('application/json'):
+                return False
+        return True
+
     def body(self):
         n = int(self.headers.get('Content-Length', 0))
         return json.loads(self.rfile.read(n) or b'{}')
 
     def do_GET(self):
+        if not self.allowed():
+            return self.send(403, {'error': 'Open the studio at http://127.0.0.1:%d' % PORT})
         path = self.path.split('?')[0]
         if path in ('/', '/index.html'):
             with open(os.path.join(HERE, 'studio.html'), 'rb') as f:
@@ -78,6 +96,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404, {'error': 'Not found'})
 
     def do_POST(self):
+        if not self.allowed(post=True):
+            return self.send(403, {'error': 'Only the studio page can do that'})
         path = self.path.split('?')[0]
         try:
             data = self.body()
