@@ -476,7 +476,9 @@ end
 -- costs a little).
 local function cropScale(s, grow)
     local full = defs.look(s.kind, s.variant).cropScale or 1
-    return full * math.max(0.12, math.floor(grow * 20 + 0.5) / 20)
+    -- a fresh planting shows as a small plant, not a speck
+    local g = math.floor(grow * 20 + 0.5) / 20
+    return full * (defs.crops.sproutSize + (1 - defs.crops.sproutSize) * g)
 end
 
 -- Plot i's plant as the field says: none when bare, sized as it's grown.

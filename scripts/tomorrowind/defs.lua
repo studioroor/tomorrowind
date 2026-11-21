@@ -677,7 +677,8 @@ defs.trees = {
 defs.crops = {
     grid = 5, spacing = 110, -- the plots: grid x grid, spacing apart, minus the middle
     growHours = 4,           -- sprout to ripe, untended
-    sprout = 0.12,           -- how big a fresh planting is, as a share of a ripe crop
+    sprout = 0.12,           -- how far along a fresh planting is (0: bare, 1: ripe)
+    sproutSize = 0.35,       -- the size a plant shows at when just planted, as a share of a ripe one
     tendGrow = 0.08,         -- what one round of tending adds
     yield = 2,               -- food from a ripe plot
     harvestSeconds = 20,     -- the work at a plot, at normal speed
