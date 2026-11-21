@@ -286,44 +286,9 @@ def load_sound(path):
     return np.frombuffer(r.stdout, dtype=np.float32).reshape(-1, 2).copy()
 
 
-def add(mix, sound, at, gain=1.0):
-    a = int(at * RATE)
-    if a >= len(mix):
-        return
-    n = min(len(sound), len(mix) - a)
-    mix[a:a + n] += sound[:n] * gain
-
-
-def pad(total):
-    """An original slow pad in D minor, with a low hit on the big moments."""
-    n = int(total * RATE)
-    t = np.arange(n) / RATE
-    chords = [(146.83, 174.61, 220.0), (116.54, 174.61, 233.08), (130.81, 196.0, 261.63), (110.0, 164.81, 220.0)]
-    out = np.zeros((n, 2), dtype=np.float32)
-    bar = total / (len(chords) * 2)
-    for i in range(len(chords) * 2):
-        chord = chords[i % len(chords)]
-        a, b = int(i * bar * RATE), min(n, int((i + 1.35) * bar * RATE))
-        tt = t[a:b] - t[a]
-        length = b - a
-        env = np.minimum(np.minimum(tt / 1.2, 1.0), (length / RATE - tt) / 1.6).clip(0, 1) ** 1.2
-        tone = np.zeros(length)
-        right = np.zeros(length)
-        for f in chord:
-            for det, gain in ((1.0, 1.0), (1.003, 0.6), (0.5, 0.5), (2.0, 0.14)):
-                tone += gain * np.sin(2 * np.pi * f * det * tt)
-                right += gain * np.sin(2 * np.pi * f * det * 1.0015 * tt + 0.7)
-        out[a:b, 0] += (tone * env * 0.05).astype(np.float32)
-        out[a:b, 1] += (right * env * 0.05).astype(np.float32)
-    return out
-
-
-def hit(at, mix):
-    """A soft low drum."""
-    length = int(1.4 * RATE)
-    tt = np.arange(length) / RATE
-    wave = np.sin(2 * np.pi * (46 + 30 * np.exp(-tt * 18)) * tt) * np.exp(-tt * 3.2) * 0.42
-    add(mix, np.stack([wave, wave], axis=1).astype(np.float32), at)
+# the soundtrack: the pad, the drum and mixing, shared with tools/music (the studio)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from music.synth import add, hit, pad  # noqa: E402
 
 
 def impacts(log, shots_at):

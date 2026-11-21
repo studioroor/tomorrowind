@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tomorrowind studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232a2622'/%3E%3Cpath d='M5 3v8.5a2 2 0 1 1-1-1.7V3h7v6.5a2 2 0 1 1-1-1.7V5H5z' fill='%23d9a441'/%3E%3C/svg%3E">
+<style>
+@font-face { font-family: 'MysticCards'; src: url('/font/MysticCards.ttf') format('truetype'); }
+:root {
+  --ash: #2a2622;
+  --basalt: #36302a;
+  --basalt-2: #40392f;
+  --line: #55493b;
+  --parch: #e9dcc0;
+  --parch-dim: #b2a387;
+  --gold: #d9a441;
+  --moss: #7fa37a;
+  --dusk: #8c7bb8;
+  --display: 'MysticCards', 'Palatino', 'Book Antiqua', serif;
+  --text: 'Iowan Old Style', 'Palatino', 'Georgia', serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--ash); color: var(--parch); font: 15px/1.45 var(--text); }
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+header { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: end; padding: 18px 24px 14px; border-bottom: 1px solid var(--line); background: var(--basalt); position: sticky; top: 0; z-index: 5; }
+h1 { font: 30px/1 var(--display); color: var(--gold); margin: 0 10px 2px 0; letter-spacing: .01em; }
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field > span { color: var(--parch-dim); font-size: 13px; }
+input[type=text], input[type=number], select { background: var(--ash); border: 1px solid var(--line); border-radius: 4px; padding: 5px 8px; }
+input[type=number] { width: 68px; }
+.btn { background: var(--basalt-2); border: 1px solid var(--line); border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+.btn:hover { border-color: var(--parch-dim); }
+.btn.primary { background: var(--gold); color: #2a1f0e; border-color: var(--gold); font-weight: 600; }
+.btn.on { border-color: var(--gold); color: var(--gold); }
+.transport { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+#status { color: var(--parch-dim); font-size: 13px; min-width: 16ch; }
+#status.error { color: #e39b8a; }
+
+main { padding: 18px 24px 60px; max-width: 1500px; }
+section { margin-bottom: 26px; }
+h2 { font: 21px/1 var(--display); color: var(--parch); margin: 0 0 10px; font-weight: normal; }
+.hint { color: var(--parch-dim); font-size: 13px; margin: -4px 0 10px; }
+
+/* chords: the tiles are the one big thing */
+#chords { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
+.tile { min-width: 112px; padding: 10px 14px 8px; background: var(--basalt); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: 2px; }
+.tile .sym { font: 44px/1 var(--display); color: var(--gold); }
+.tile .sub { color: var(--parch-dim); font-size: 12px; }
+.tile.sel { border-color: var(--gold); box-shadow: inset 0 0 0 1px var(--gold); }
+.tile.now { background: #4a3f2c; }
+.tile.add { justify-content: center; align-items: center; color: var(--parch-dim); font-size: 28px; min-width: 64px; }
+#chordEdit { margin-top: 12px; padding: 12px 14px; background: var(--basalt); border: 1px solid var(--line); border-radius: 6px; display: grid; gap: 10px; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.row > .label { width: 74px; color: var(--parch-dim); font-size: 13px; }
+.chip { padding: 4px 10px; min-width: 38px; border-radius: 4px; border: 1px solid var(--line); background: var(--ash); cursor: pointer; }
+.chip.on { background: var(--gold); color: #2a1f0e; border-color: var(--gold); }
+
+/* melody */
+.rollwrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; background: #231f1c; }
+canvas { display: block; }
+#roll { cursor: crosshair; }
+
+/* tracks */
+.track { border: 1px solid var(--line); border-left: 6px solid var(--gold); border-radius: 6px; background: var(--basalt); margin-bottom: 10px; }
+.track.pad { border-left-color: var(--dusk); }
+.track.pluck { border-left-color: var(--moss); }
+.track.off { opacity: .55; }
+.thead { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; padding: 10px 12px; }
+.tname { font: 22px/1 var(--display); min-width: 170px; }
+.tbody { display: none; padding: 4px 12px 14px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px 22px; border-top: 1px solid var(--line); }
+.track.open .tbody { display: grid; }
+.knob { display: grid; grid-template-columns: 1fr auto; gap: 0 8px; font-size: 13px; }
+.knob span { color: var(--parch-dim); }
+.knob output { font-variant-numeric: tabular-nums; }
+.knob input[type=range], .knob select { grid-column: 1 / 3; width: 100%; }
+input[type=range] { accent-color: var(--gold); }
+.addbar { display: flex; gap: 8px; flex-wrap: wrap; }
+.small { padding: 3px 9px; font-size: 13px; }
+.danger:hover { border-color: #e39b8a; color: #e39b8a; }
+@media (max-width: 700px) { header { position: static; } .transport { margin-left: 0; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tomorrowind studio</h1>
+  <label class="field"><span>Song</span>
+    <select id="songList" aria-label="Open a song"></select></label>
+  <label class="field"><span>Name</span><input type="text" id="name" size="14"></label>
+  <button class="btn" id="save">Save</button>
+  <label class="field"><span>Tempo</span><input type="number" id="bpm" min="20" max="200" step="1"></label>
+  <label class="field"><span>Beats a bar</span><input type="number" id="bpb" min="2" max="8" step="1"></label>
+  <label class="field"><span>Play chords</span><input type="number" id="repeat" min="1" max="16" step="1"></label>
+  <div class="transport">
+    <button class="btn primary" id="play">Play</button>
+    <button class="btn" id="stop">Stop</button>
+    <button class="btn" id="loop" aria-pressed="false">Loop</button>
+    <button class="btn" id="export">Export WAV</button>
+    <span id="status" role="status"></span>
+  </div>
+</header>
+<main>
+  <section>
+    <h2>Chords</h2>
+    <p class="hint">Click a chord to change it. They play left to right, as many times as "Play chords" says.</p>
+    <div id="chords"></div>
+    <div id="chordEdit"></div>
+  </section>
+  <section>
+    <h2>Melody and drums</h2>
+    <p class="hint">Click the grid to place a note, click a note to take it away. Gold rows are the notes of the chord playing there. The bottom row has a low drum at the start of a bar.</p>
+    <div class="row" style="margin-bottom:8px"><span class="label">Note length</span><span id="lens" class="row"></span>
+      <button class="btn small danger" id="clearMelody">Clear the melody</button></div>
+    <div class="rollwrap"><canvas id="roll"></canvas></div>
+  </section>
+  <section>
+    <h2>Tracks</h2>
+    <p class="hint">Each track plays one part of the song with one sound. Open a track to shape its sound.</p>
+    <div id="tracks"></div>
+    <div class="addbar">
+      <button class="btn" data-add="pad">Add the pad synth</button>
+      <button class="btn" data-add="pluck">Add a pluck synth</button>
+      <button class="btn" data-add="instrument">Add an instrument</button>
+    </div>
+  </section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+let setup, song, sel = 0, noteLen = 1;
+const LENS = [[0.5, '½'], [1, '1'], [2, '2'], [4, '4'], [8, '8']];
+const PITCH_LO = 43, PITCH_HI = 86, ROW = 13, KEYS = 44;
+const PARTS = [['chords', 'Chords'], ['bass', 'Bass'], ['melody', 'Melody'], ['arp', 'Arpeggio']];
+const SHARPS = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
+const DISPLAY = { 'C#': 'C♯', 'Eb': 'E♭', 'F#': 'F♯', 'Ab': 'A♭', 'Bb': 'B♭' };
+const QNAMES = { '': 'major', 'm': 'minor', '5': 'no third', 'sus2': 'sus2', 'sus4': 'sus4', 'dim': 'dim', 'aug': 'aug', 'maj7': 'maj7', 'm7': 'm7', '7': '7', 'add9': 'add9', 'madd9': 'm add9' };
+
+// what each knob means, in plain words
+const PAD_KNOBS = [
+  ['wave', 'Tone', null], ['detune', 'Beating (how fast it shimmers)', [1, 1.01, 0.0005]], ['shimmer', 'Beating strength', [0, 1, 0.01]],
+  ['sub', 'Octave below', [0, 1, 0.01]], ['air', 'Octave above', [0, 0.6, 0.01]], ['width', 'Stereo width', [1, 1.004, 0.0001]],
+  ['attack', 'Fade in (s)', [0.02, 4, 0.01]], ['release', 'Fade out (s)', [0.05, 5, 0.01]], ['overlap', 'Chords overlap (bars)', [1, 2, 0.01]],
+  ['vibrato', 'Vibrato (cents)', [0, 40, 0.5]], ['vibratoRate', 'Vibrato speed (Hz)', [1, 8, 0.1]],
+  ['tremolo', 'Tremolo', [0, 1, 0.01]], ['tremoloRate', 'Tremolo speed (Hz)', [0.5, 8, 0.1]], ['level', 'Loudness', [0.005, 0.12, 0.001]],
+];
+const PLUCK_KNOBS = [
+  ['decay', 'Ring time (s)', [0.2, 6, 0.05]], ['brightness', 'Brightness', [0.1, 0.95, 0.01]], ['strum', 'Strum (s between strings)', [0, 0.2, 0.005]],
+  ['width', 'Stereo width', [1, 1.006, 0.0001]], ['level', 'Loudness', [0.01, 0.25, 0.005]],
+];
+const INSTR_KNOBS = [
+  ['program', 'Instrument', null], ['velocity', 'How hard it is played', [10, 127, 1]], ['pan', 'Left or right', [0, 127, 1]], ['reverb', 'Room', [0, 127, 1]],
+];
+
+function status(text, error) { const s = $('#status'); s.textContent = text || ''; s.className = error ? 'error' : ''; }
+function midiName(m) { return (DISPLAY[SHARPS[m % 12]] || SHARPS[m % 12]) + (Math.floor(m / 12) - 1); }
+function chordSym(c) { return (DISPLAY[c.root] || c.root) + (c.quality || ''); }
+function beatsPerBar() { return +song.beatsPerBar || 4; }
+function passBeats() { return song.chords.reduce((n, c) => n + (+c.bars || 1), 0) * beatsPerBar(); }
+function chordNotes(c) {
+  const iv0 = { '': [0, 4, 7], 'm': [0, 3, 7], '5': [0, 7, 12], 'sus2': [0, 2, 7], 'sus4': [0, 5, 7], 'dim': [0, 3, 6], 'aug': [0, 4, 8],
+    'maj7': [0, 4, 7, 11], 'm7': [0, 3, 7, 10], '7': [0, 4, 7, 10], 'add9': [0, 4, 7, 14], 'madd9': [0, 3, 7, 14] }[c.quality || ''] || [0, 4, 7];
+  const root = 12 * ((+c.octave || 3) + 1) + SHARPS.indexOf(c.root);
+  return iv0.map((i) => root + i);
+}
+function chordAtBeat(b) {
+  let t = 0;
+  for (const [i, c] of song.chords.entries()) { const n = (+c.bars || 1) * beatsPerBar(); if (b < t + n) return i; t += n; }
+  return -1;
+}
+
+// ---------------------------------------------------------------- draft
+function keep() { try { localStorage.setItem('tmw-studio-draft', JSON.stringify(song)); } catch (e) {} changed(); }
+
+// ---------------------------------------------------------------- header
+async function loadSongList(pick) {
+  const names = await (await fetch('/api/songs')).json();
+  const list = $('#songList');
+  list.innerHTML = '';
+  for (const n of names) list.add(new Option(n, n));
+  if (pick) list.value = pick;
+}
+async function openSong(name) {
+  const r = await fetch('/api/song/' + encodeURIComponent(name));
+  if (!r.ok) return status('There is no song called ' + name, true);
+  song = await r.json();
+  sel = 0;
+  drawAll();
+  status('Opened ' + name);
+}
+function bindHeader() {
+  $('#songList').onchange = (e) => openSong(e.target.value);
+  $('#name').oninput = (e) => { song.name = e.target.value; keep(); };
+  for (const [id, key] of [['#bpm', 'bpm'], ['#bpb', 'beatsPerBar'], ['#repeat', 'repeat']]) {
+    $(id).onchange = (e) => { song[key] = Math.max(+e.target.min, Math.min(+e.target.max, +e.target.value || +e.target.min)); e.target.value = song[key]; keep(); drawRoll(); };
+  }
+  $('#save').onclick = async () => {
+    const r = await (await fetch('/api/save', { method: 'POST', body: JSON.stringify({ song }) })).json();
+    if (r.error) return status(r.error, true);
+    song.name = r.name; $('#name').value = r.name;
+    await loadSongList(r.name);
+    status('Saved as music/songs/' + r.name + '.json');
+  };
+  $('#play').onclick = play;
+  $('#stop').onclick = stop;
+  $('#loop').onclick = () => { looping = !looping; $('#loop').classList.toggle('on', looping); $('#loop').setAttribute('aria-pressed', looping); if (playing) play(); };
+  $('#export').onclick = async () => {
+    status('Exporting…');
+    const r = await (await fetch('/api/export', { method: 'POST', body: JSON.stringify({ song, loop: looping }) })).json();
+    status(r.error ? r.error : 'Exported ' + r.path, !!r.error);
+  };
+  $('#clearMelody').onclick = () => { song.melody = []; keep(); drawRoll(); };
+  for (const b of document.querySelectorAll('[data-add]')) b.onclick = () => addTrack(b.dataset.add);
+}
+function drawHeader() {
+  $('#name').value = song.name || '';
+  $('#bpm').value = song.bpm; $('#bpb').value = beatsPerBar(); $('#repeat').value = song.repeat || 1;
+}
+
+// ---------------------------------------------------------------- chords
+function drawChords() {
+  const box = $('#chords');
+  box.innerHTML = '';
+  song.chords.forEach((c, i) => {
+    const t = document.createElement('button');
+    t.className = 'tile' + (i === sel ? ' sel' : '');
+    t.innerHTML = `<span class="sym"></span><span class="sub"></span>`;
+    t.querySelector('.sym').textContent = chordSym(c);
+    t.querySelector('.sub').textContent = `${c.bars || 1} bar${(c.bars || 1) == 1 ? '' : 's'}, ${c.voicing || 'close'}, octave ${c.octave}`;
+    t.onclick = () => { sel = i; drawChords(); };
+    box.appendChild(t);
+  });
+  const add = document.createElement('button');
+  add.className = 'tile add'; add.textContent = '+'; add.title = 'Add a chord'; add.setAttribute('aria-label', 'Add a chord');
+  add.onclick = () => { const last = song.chords[song.chords.length - 1] || { root: 'D', octave: 3, quality: 'm', voicing: 'close', bars: 1 }; song.chords.push({ ...last }); sel = song.chords.length - 1; keep(); drawChords(); drawRoll(); };
+  box.appendChild(add);
+  drawChordEdit();
+}
+function drawChordEdit() {
+  const ed = $('#chordEdit'), c = song.chords[sel];
+  if (!c) { ed.style.display = 'none'; return; }
+  ed.style.display = '';
+  ed.innerHTML = '';
+  const row = (label) => { const r = document.createElement('div'); r.className = 'row'; r.innerHTML = `<span class="label">${label}</span>`; ed.appendChild(r); return r; };
+  const chip = (r, text, on, fn, title) => { const b = document.createElement('button'); b.className = 'chip' + (on ? ' on' : ''); b.textContent = text; if (title) b.title = title; b.onclick = () => { fn(); keep(); drawChords(); drawRoll(); }; r.appendChild(b); };
+  const notes = row('Root');
+  for (const n of setup.notes) chip(notes, DISPLAY[n] || n, c.root === n, () => c.root = n);
+  const q = row('Kind');
+  for (const k of setup.qualities) chip(q, k === '' ? 'major' : QNAMES[k] || k, (c.quality || '') === k, () => c.quality = k);
+  const v = row('Spacing');
+  for (const k of setup.voicings) chip(v, k, (c.voicing || 'close') === k, () => c.voicing = k,
+    { close: 'Notes close together', open: 'The third an octave up: wide and hollow', spread: 'Low root added, octave on top' }[k]);
+  const o = row('Octave');
+  for (const k of [1, 2, 3, 4, 5]) chip(o, String(k), +c.octave === k, () => c.octave = k);
+  const b = row('Bars');
+  for (const k of [0.5, 1, 2, 3, 4]) chip(b, String(k), +(c.bars || 1) === k, () => c.bars = k);
+  const m = row('');
+  chip(m, 'Move left', false, () => { if (sel > 0) { [song.chords[sel - 1], song.chords[sel]] = [song.chords[sel], song.chords[sel - 1]]; sel--; } });
+  chip(m, 'Move right', false, () => { if (sel < song.chords.length - 1) { [song.chords[sel + 1], song.chords[sel]] = [song.chords[sel], song.chords[sel + 1]]; sel++; } });
+  chip(m, 'Copy', false, () => { song.chords.splice(sel + 1, 0, { ...c }); sel++; });
+  chip(m, 'Remove', false, () => { if (song.chords.length > 1) { song.chords.splice(sel, 1); sel = Math.max(0, sel - 1); } });
+}
+
+// ---------------------------------------------------------------- melody roll
+const roll = $('#roll');
+let pxBeat = 32;
+function drawRoll() {
+  const beats = passBeats(), rows = PITCH_HI - PITCH_LO + 1;
+  const wrapW = roll.parentElement.clientWidth - 2;
+  pxBeat = Math.max(26, Math.floor((wrapW - KEYS) / beats));
+  const W = KEYS + beats * pxBeat, H = rows * ROW + 30;
+  const dpr = window.devicePixelRatio || 1;
+  roll.width = W * dpr; roll.height = H * dpr; roll.style.width = W + 'px'; roll.style.height = H + 'px';
+  const g = roll.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = '#231f1c'; g.fillRect(0, 0, W, H);
+  // rows: black keys darker, the playing chord's notes in gold
+  let t = 0;
+  const spans = song.chords.map((c) => { const n = (+c.bars || 1) * beatsPerBar(); const s = [t, n, chordNotes(c).map((x) => x % 12)]; t += n; return s; });
+  for (let p = PITCH_LO; p <= PITCH_HI; p++) {
+    const y = (PITCH_HI - p) * ROW;
+    const black = [1, 3, 6, 8, 10].includes(p % 12);
+    g.fillStyle = black ? '#201c19' : '#2a2521';
+    g.fillRect(KEYS, y, W - KEYS, ROW);
+    for (const [s, n, pcs] of spans) {
+      if (pcs.includes(p % 12)) { g.fillStyle = 'rgba(217,164,65,0.16)'; g.fillRect(KEYS + s * pxBeat, y, n * pxBeat, ROW); }
+    }
+    g.fillStyle = black ? '#3a332c' : '#cfc2a5';
+    g.fillRect(0, y, KEYS - 2, ROW - 1);
+    if (p % 12 === 0 || p % 12 === 9) { g.fillStyle = black ? '#cfc2a5' : '#2a2622'; g.font = '10px Georgia'; g.fillText(midiName(p), 4, y + ROW - 3); }
+  }
+  // the grid: half beats, beats, bars
+  for (let b = 0; b <= beats * 2; b++) {
+    const x = KEYS + b * pxBeat / 2;
+    const bar = b % (beatsPerBar() * 2) === 0, beat = b % 2 === 0;
+    g.fillStyle = bar ? '#6b5c48' : beat ? '#3d352d' : '#2f2924';
+    g.fillRect(x, 0, bar ? 2 : 1, rows * ROW);
+  }
+  // chord names along the top of their spans
+  g.font = '15px MysticCards, Georgia'; g.fillStyle = 'rgba(217,164,65,0.85)';
+  song.chords.forEach((c, i) => g.fillText(chordSym(c), KEYS + spans[i][0] * pxBeat + 5, 14));
+  // notes
+  for (const n of song.melody || []) {
+    if (n.pitch < PITCH_LO || n.pitch > PITCH_HI || n.beat >= beats) continue;
+    const x = KEYS + n.beat * pxBeat, y = (PITCH_HI - n.pitch) * ROW, w = Math.min(n.len, beats - n.beat) * pxBeat;
+    g.fillStyle = '#7fa37a'; g.fillRect(x + 1, y + 1, w - 2, ROW - 2);
+    g.fillStyle = '#a9c9a2'; g.fillRect(x + 1, y + 1, 3, ROW - 2);
+  }
+  // drums: a row of bars along the bottom
+  const dy = rows * ROW + 4;
+  g.fillStyle = '#cfc2a5'; g.font = '11px Georgia'; g.fillText('Drum', 4, dy + 16);
+  const bars = beats / beatsPerBar();
+  for (let b = 0; b < bars; b++) {
+    const x = KEYS + b * beatsPerBar() * pxBeat;
+    const on = (song.drums || []).includes(b);
+    g.fillStyle = on ? '#d9a441' : '#2f2924';
+    g.fillRect(x + 3, dy, Math.min(26, beatsPerBar() * pxBeat - 6), 22);
+    g.strokeStyle = '#6b5c48'; g.strokeRect(x + 3.5, dy + .5, Math.min(26, beatsPerBar() * pxBeat - 6) - 1, 21);
+  }
+  drawPlayhead(g);
+}
+let headBeat = -1;
+function drawPlayhead(g) {
+  if (headBeat < 0) return;
+  const x = KEYS + headBeat * pxBeat;
+  g.fillStyle = '#e9dcc0'; g.fillRect(x, 0, 2, (PITCH_HI - PITCH_LO + 1) * ROW);
+}
+roll.addEventListener('click', (e) => {
+  const r = roll.getBoundingClientRect();
+  const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (x < KEYS) return;
+  const beats = passBeats(), rows = PITCH_HI - PITCH_LO + 1;
+  if (y > rows * ROW) {
+    const bar = Math.floor((x - KEYS) / (beatsPerBar() * pxBeat));
+    song.drums = song.drums || [];
+    const i = song.drums.indexOf(bar);
+    if (i >= 0) song.drums.splice(i, 1); else song.drums.push(bar);
+    keep(); drawRoll(); return;
+  }
+  const beat = Math.floor((x - KEYS) / pxBeat * 2) / 2, pitch = PITCH_HI - Math.floor(y / ROW);
+  song.melody = song.melody || [];
+  const hit = song.melody.findIndex((n) => n.pitch === pitch && beat >= n.beat && beat < n.beat + n.len);
+  if (hit >= 0) song.melody.splice(hit, 1);
+  else if (beat < beats) { song.melody.push({ beat, len: Math.min(noteLen, beats - beat), pitch }); blip(pitch); }
+  keep(); drawRoll();
+});
+roll.addEventListener('mousemove', (e) => {
+  const r = roll.getBoundingClientRect(), y = e.clientY - r.top;
+  const p = PITCH_HI - Math.floor(y / ROW);
+  roll.title = p >= PITCH_LO ? midiName(p) : 'Drum';
+});
+function drawLens() {
+  const box = $('#lens'); box.innerHTML = '';
+  for (const [v, label] of LENS) {
+    const b = document.createElement('button'); b.className = 'chip' + (v === noteLen ? ' on' : ''); b.textContent = label;
+    b.title = v + (v === 1 ? ' beat' : ' beats'); b.onclick = () => { noteLen = v; drawLens(); }; box.appendChild(b);
+  }
+}
+
+// ---------------------------------------------------------------- tracks
+function addTrack(type) {
+  const base = { type, part: type === 'pluck' ? 'arp' : type === 'instrument' ? 'chords' : 'chords', volume: 1, octave: 0 };
+  if (type === 'pad') Object.assign(base, setup.pad);
+  if (type === 'pluck') Object.assign(base, setup.pluck, { step: 0.5, pattern: 'up' });
+  if (type === 'instrument') Object.assign(base, setup.instrument);
+  song.tracks.push(base);
+  keep(); drawTracks(song.tracks.length - 1);
+}
+function instrumentName(p) { return Object.entries(setup.instruments).find(([, v]) => v === +p)?.[0] || 'Program ' + p; }
+function trackName(t) { return t.type === 'pad' ? 'Pad synth' : t.type === 'pluck' ? 'Pluck synth' : instrumentName(t.program ?? 48); }
+let openTracks = new Set();
+function knob(box, t, key, label, range, onChange) {
+  // a setting the song doesn't have yet shows (and plays) at its default
+  const defaults = t.type === 'pad' ? setup.pad : t.type === 'pluck' ? setup.pluck : setup.instrument;
+  const value = t[key] ?? defaults[key];
+  const k = document.createElement('label'); k.className = 'knob';
+  if (!range) {
+    const s = document.createElement('select');
+    const opts = key === 'wave' ? setup.waves.map((w) => [w, w]) : key === 'program' ? Object.entries(setup.instruments).map(([n, v]) => [v, n])
+      : key === 'pattern' ? [['up', 'Up'], ['down', 'Down'], ['updown', 'Up and down']] : key === 'step' ? [[0.25, 'Sixteenths'], [0.5, 'Eighths'], [1, 'Quarters']] : [];
+    for (const [v, n] of opts) s.add(new Option(n, v));
+    s.value = value ?? (key === 'step' ? 0.5 : key === 'pattern' ? 'up' : '');
+    s.onchange = () => { t[key] = key === 'wave' || key === 'pattern' ? s.value : +s.value; keep(); onChange && onChange(); };
+    k.innerHTML = `<span>${label}</span><span></span>`; k.appendChild(s);
+  } else {
+    const [lo, hi, step] = range;
+    const r = document.createElement('input'); r.type = 'range'; r.min = lo; r.max = hi; r.step = step; r.value = value ?? lo;
+    const out = document.createElement('output'); out.textContent = (+r.value).toString();
+    r.oninput = () => { t[key] = +r.value; out.textContent = r.value; };
+    r.onchange = () => { keep(); };
+    const sp = document.createElement('span'); sp.textContent = label;
+    k.append(sp, out, r);
+  }
+  box.appendChild(k);
+}
+function drawTracks(openIndex) {
+  if (openIndex !== undefined) openTracks.add(openIndex);
+  const box = $('#tracks'); box.innerHTML = '';
+  song.tracks.forEach((t, i) => {
+    const el = document.createElement('div');
+    el.className = `track ${t.type}` + (openTracks.has(i) ? ' open' : '') + (t.mute ? ' off' : '');
+    const head = document.createElement('div'); head.className = 'thead';
+    const name = document.createElement('span'); name.className = 'tname'; name.textContent = trackName(t);
+    const part = document.createElement('select'); part.setAttribute('aria-label', 'What it plays');
+    for (const [v, n] of PARTS) part.add(new Option('Plays: ' + n.toLowerCase(), v));
+    part.value = t.part || 'chords'; part.onchange = () => { t.part = part.value; keep(); drawTracks(); };
+    const vol = document.createElement('label'); vol.className = 'knob'; vol.style.minWidth = '150px';
+    vol.innerHTML = '<span>Volume</span><output></output>';
+    const vr = document.createElement('input'); vr.type = 'range'; vr.min = 0; vr.max = 1.5; vr.step = 0.01; vr.value = t.volume ?? 1;
+    vol.querySelector('output').textContent = vr.value; vr.oninput = () => { t.volume = +vr.value; vol.querySelector('output').textContent = vr.value; }; vr.onchange = keep; vol.appendChild(vr);
+    const oct = document.createElement('select'); oct.setAttribute('aria-label', 'Octave');
+    for (const o of [-2, -1, 0, 1, 2]) oct.add(new Option((o > 0 ? 'Octave +' : 'Octave ') + o, o));
+    oct.value = t.octave || 0; oct.onchange = () => { t.octave = +oct.value; keep(); };
+    const btn = (text, on, fn, cls) => { const b = document.createElement('button'); b.className = 'btn small' + (on ? ' on' : '') + (cls ? ' ' + cls : ''); b.textContent = text; b.onclick = fn; return b; };
+    head.append(name, part, oct, vol,
+      btn('Mute', t.mute, () => { t.mute = !t.mute; keep(); drawTracks(); }),
+      btn('Solo', t.solo, () => { t.solo = !t.solo; keep(); drawTracks(); }),
+      btn(openTracks.has(i) ? 'Close' : 'Shape the sound', false, () => { openTracks.has(i) ? openTracks.delete(i) : openTracks.add(i); drawTracks(); }),
+      btn('Remove', false, () => { song.tracks.splice(i, 1); openTracks = new Set(); keep(); drawTracks(); }, 'danger'));
+    el.appendChild(head);
+    const body = document.createElement('div'); body.className = 'tbody';
+    const knobs = t.type === 'pad' ? PAD_KNOBS : t.type === 'pluck' ? PLUCK_KNOBS : INSTR_KNOBS;
+    for (const [key, label, range] of knobs) knob(body, t, key, label, range, key === 'program' ? () => { name.textContent = trackName(t); } : null);
+    if ((t.part || 'chords') === 'arp') { knob(body, t, 'step', 'Arpeggio speed', null); knob(body, t, 'pattern', 'Arpeggio goes', null); }
+    el.appendChild(body);
+    box.appendChild(el);
+  });
+}
+
+// ---------------------------------------------------------------- playing
+let ctx, source, playing = false, looping = false, startAt = 0, duration = 0, rerender;
+async function render() {
+  const r = await fetch('/api/render', { method: 'POST', body: JSON.stringify({ song, loop: looping }) });
+  if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || 'The song could not be played'); }
+  ctx = ctx || new AudioContext();
+  return ctx.decodeAudioData(await r.arrayBuffer());
+}
+async function play(fromOffset) {
+  status('Playing soon…');
+  try {
+    const buf = await render();
+    const offset = typeof fromOffset === 'number' ? fromOffset % buf.duration : 0;
+    stopSource();
+    source = ctx.createBufferSource(); source.buffer = buf; source.loop = looping;
+    source.connect(ctx.destination);
+    source.start(0, offset);
+    startAt = ctx.currentTime - offset; duration = buf.duration; playing = true;
+    source.onended = () => { if (!looping && source && source.buffer === buf) { playing = false; headBeat = -1; drawRoll(); status(''); } };
+    status(looping ? 'Looping' : 'Playing');
+    tick();
+  } catch (e) { status(e.message, true); }
+}
+function stopSource() { if (source) { try { source.onended = null; source.stop(); } catch (e) {} source = null; } }
+function stop() { stopSource(); playing = false; headBeat = -1; drawRoll(); drawChords(); status('Stopped'); }
+function tick() {
+  if (!playing) return;
+  let t = ctx.currentTime - startAt;
+  if (looping) t %= duration;
+  const beatS = 60 / song.bpm, pass = passBeats();
+  const beat = (t / beatS) % pass;
+  headBeat = beat;
+  drawRoll();
+  const now = chordAtBeat(beat);
+  document.querySelectorAll('.tile:not(.add)').forEach((el, i) => el.classList.toggle('now', i === now));
+  requestAnimationFrame(tick);
+}
+// tinkering while it plays: hear the change a moment later, from where it was
+function changed() {
+  if (!playing) return;
+  clearTimeout(rerender);
+  rerender = setTimeout(() => play(ctx.currentTime - startAt), 700);
+}
+// a short tone when a note is placed
+function blip(p) {
+  ctx = ctx || new AudioContext();
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = 440 * 2 ** ((p - 69) / 12); o.type = 'triangle';
+  g.gain.setValueAtTime(0.0001, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+  o.connect(g).connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.55);
+}
+document.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) { e.preventDefault(); playing ? stop() : play(); }
+});
+
+// ---------------------------------------------------------------- start
+function drawAll() { drawHeader(); drawChords(); drawLens(); drawRoll(); drawTracks(); }
+window.addEventListener('resize', () => drawRoll());
+(async () => {
+  setup = await (await fetch('/api/setup')).json();
+  bindHeader();
+  await loadSongList();
+  let draft = null;
+  try { draft = JSON.parse(localStorage.getItem('tmw-studio-draft') || 'null'); } catch (e) {}
+  if (draft && draft.chords) { song = draft; drawAll(); status('Picked up where you left off'); $('#songList').value = draft.name; }
+  else await openSong('trailer');
+  if (!setup.soundfont) status('Instruments need the SoundFont: see music/README.md', true);
+  document.fonts && document.fonts.ready.then(() => drawAll());
+})();
+</script>
+</body>
+</html>

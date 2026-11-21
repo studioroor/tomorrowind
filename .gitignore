@@ -3,3 +3,5 @@ __pycache__/
 .playtest/
 trailer/
 dist/
+music/soundfonts/
+music/out/

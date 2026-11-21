@@ -365,6 +365,7 @@ TEST_CONTENT=probe_map.omwscripts tools/playtest.sh .playtest/map Pelagiad # map
 TEST_CONTENT=trees.omwscripts SHOTS="" tools/playtest.sh .playtest/trees Pelagiad # felling, regrowth, a grove
 TEST_CONTENT=crops.omwscripts SHOTS="" tools/playtest.sh .playtest/crops Pelagiad # harvest, planting, tending, regrowth
 tools/make_timelapse.sh .playtest/tl     # a village going up, as a looping GIF
+tools/music/studio.py                    # the music studio: chords, melodies, synths, instruments (music/README.md)
 TEST_CONTENT=ambient_scout.omwscripts SHOTS="" tools/playtest.sh .playtest/scout Pelagiad
 tools/ambient_scout.py .playtest/scout   # the candidate cameras, and a map of where settlers walk
 tools/film_ambient.sh .playtest/amb      # a living colony along the road, from the chosen cameras

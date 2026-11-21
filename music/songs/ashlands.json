@@ -1,0 +1,27 @@
+{
+  "name": "ashlands",
+  "bpm": 52,
+  "repeat": 2,
+  "beatsPerBar": 4,
+  "chords": [
+    {"root": "D", "octave": 3, "quality": "m", "voicing": "open", "bars": 1},
+    {"root": "Bb", "octave": 2, "quality": "", "voicing": "open", "bars": 1},
+    {"root": "F", "octave": 3, "quality": "", "voicing": "open", "bars": 1},
+    {"root": "C", "octave": 3, "quality": "sus4", "voicing": "open", "bars": 1}
+  ],
+  "melody": [
+    {"beat": 0, "len": 3, "pitch": 69}, {"beat": 3, "len": 1, "pitch": 67},
+    {"beat": 4, "len": 2, "pitch": 65}, {"beat": 6, "len": 2, "pitch": 62},
+    {"beat": 8, "len": 3, "pitch": 64}, {"beat": 11, "len": 1, "pitch": 65},
+    {"beat": 12, "len": 4, "pitch": 67}
+  ],
+  "drums": [0, 2],
+  "tracks": [
+    {"type": "pad", "part": "chords", "volume": 0.6, "octave": 0, "wave": "warm"},
+    {"type": "instrument", "part": "chords", "program": 49, "volume": 0.9, "octave": 0, "reverb": 80},
+    {"type": "instrument", "part": "chords", "program": 52, "volume": 0.6, "octave": 1, "reverb": 90},
+    {"type": "instrument", "part": "bass", "program": 43, "volume": 0.8, "octave": 0},
+    {"type": "instrument", "part": "arp", "program": 46, "volume": 0.7, "octave": 1, "step": 0.5, "pattern": "updown"},
+    {"type": "instrument", "part": "melody", "program": 60, "volume": 0.9, "octave": 0, "reverb": 90}
+  ]
+}

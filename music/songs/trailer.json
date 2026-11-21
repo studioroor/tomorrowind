@@ -1,0 +1,17 @@
+{
+  "name": "trailer",
+  "bpm": 44,
+  "repeat": 2,
+  "beatsPerBar": 4,
+  "chords": [
+    {"root": "D", "octave": 3, "quality": "m", "voicing": "close", "bars": 1},
+    {"root": "Bb", "octave": 2, "quality": "5", "voicing": "close", "bars": 1},
+    {"root": "C", "octave": 3, "quality": "5", "voicing": "close", "bars": 1},
+    {"root": "A", "octave": 2, "quality": "5", "voicing": "close", "bars": 1}
+  ],
+  "melody": [],
+  "drums": [0],
+  "tracks": [
+    {"type": "pad", "part": "chords", "volume": 1, "octave": 0}
+  ]
+}
