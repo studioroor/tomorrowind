@@ -1,0 +1,3 @@
+GLOBAL: scripts/tomorrowind_test/trailer_global.lua
+GLOBAL: scripts/tomorrowind_test/region_scout_global.lua
+PLAYER: scripts/tomorrowind_test/region_scout.lua

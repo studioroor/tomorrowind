@@ -7,8 +7,13 @@
     tools/film_trailer.sh .playtest/take2 trailer2
     tools/make_trailer.py .playtest/take2 trailer/ --cut 0.2
 
+    tools/film_trailer.sh .playtest/take3 trailer3
+    tools/film_trailer.sh .playtest/take3r trailer3_replant
+    tools/make_trailer.py .playtest/take3 trailer/ --cut 0.3 --extra replant=.playtest/take3r
+
 Writes trailer/tomorrowind-trailer-16x9.mp4 (YouTube) and -4x5.mp4 (Instagram);
-the 0.2 cut (what's new in that version) writes tomorrowind-0.2-trailer-*.mp4.
+the 0.2 and 0.3 cuts (what's new in those versions) write
+tomorrowind-0.2-trailer-*.mp4 and tomorrowind-0.3-trailer-*.mp4.
 Needs ffmpeg, Pillow and numpy (the sound is mixed from the game's own effects
 and an original pad generated here; --music replaces the pad).
 
@@ -70,9 +75,26 @@ EDIT_02 = [
     dict(shot='indoors', start=3.7, dur=3.4, grade=EVENING, fire=True, caption='Furnish them: rugs, tapestries, candles, shrines'),
     dict(shot='ending', start=0.5, dur=6.0, ending=True, hit=True),
 ]
+# what's new in 0.3, filmed by the trailer3 scene. mark: start at a moment the
+# scene logged ("[TRAILER] mark <shot> <name> <frame>"), plus seconds
+WOOD = 'Woodcutters fell the trees around their camp'
+PLANT = 'Plant a tree, or a whole grove'
+EDIT_03 = [
+    dict(shot='open', start=0.5, dur=4.0, title=True, hit=True),
+    dict(shot='plant', mark=('planted', -3.0), dur=4.5, caption=PLANT),
+    dict(shot='grove', start=0.3, dur=5.0, rate=1.6, caption='It grows into a little wood'),
+    dict(shot='chop', start=1.0, dur=3.0, hit=True, caption=WOOD),
+    dict(shot='fell', mark=('down', -2.2), dur=5.0, caption=WOOD, fall=True),
+    dict(shot='regrow', start=0.3, dur=5.0, rate=1.6, caption='The stump sprouts, and the tree grows back'),
+    dict(shot='harvest', mark=('harvested', -2.8), dur=4.0, hit=True, caption="Farmers harvest what's ripe..."),
+    # filmed on its own (trailer3_replant): --extra replant=<dir>
+    dict(shot='replant', take='replant', start=0.2, dur=7.0, rate=1.6, caption='...plant it again, and it grows back'),
+    dict(shot='ending', start=0.5, dur=6.0, ending=True, hit=True),
+]
 CUTS = {
     '0.1': dict(edit=EDIT_01, subtitle='A House Hlaalu colony builder for OpenMW', name='tomorrowind-trailer'),
     '0.2': dict(edit=EDIT_02, subtitle="What's new in version 0.2", name='tomorrowind-0.2-trailer'),
+    '0.3': dict(edit=EDIT_03, subtitle="What's new in version 0.3: trees and crops", name='tomorrowind-0.3-trailer'),
 }
 EDIT = EDIT_01
 SUBTITLE = CUTS['0.1']['subtitle']
@@ -89,6 +111,15 @@ def shots_from_log(path):
         if m:
             shots[m[1]] = (start[m[1]][0], int(m[2]))
     return shots
+
+
+def marks_from_log(path):
+    marks = {}
+    for line in open(path, errors='ignore'):
+        m = re.search(r'\[TRAILER\]\s+mark\s+(\w+)\s+(\w+)\s+(\d+)', line)
+        if m:
+            marks.setdefault(m[1], {})[m[2]] = int(m[3])
+    return marks
 
 
 def text_size(draw, text, font):
@@ -314,7 +345,7 @@ def impacts(log, shots_at):
         if m:
             for name, t0 in starts.items():
                 d = seconds(stamp[1]) - t0
-                if 0 <= d < 60:
+                if 0 <= d < 150:
                     out[name].append((d, m[1], float(m[2])))
     return out
 
@@ -350,8 +381,8 @@ def make_audio(take_log, total, out, music):
         if name in ('campfire', 'smelter') or clip.get('fire'):
             add(mix, fire[:int((clip['dur'] + 0.3) * RATE)], at, 0.5)
         # builders in the sped-up shots would be a rattle: only real-time shots
-        if name in ('rise', 'miner', 'smelter'):
-            gain = {'rise': 0.28, 'miner': 0.6, 'smelter': 0.6}[name]
+        if name in ('rise', 'miner', 'smelter', 'chop', 'fell', 'harvest'):
+            gain = {'rise': 0.28, 'miner': 0.6, 'smelter': 0.6, 'chop': 0.6, 'fell': 0.6, 'harvest': 0.5}[name]
             speed = (2 if name == 'rise' else 1) * clip.get('rate', 1)
             for d, sound, pitch in strikes.get(name, []):
                 t = (d - clip['start']) / speed
@@ -359,6 +390,9 @@ def make_audio(take_log, total, out, music):
                     if sound not in cache:
                         cache[sound] = load_sound(os.path.join(SOUNDS, SOUND_FILES[sound]))
                     add(mix, repitch(cache[sound], pitch), at + t, gain)
+        if clip.get('fall'):
+            # the tree comes down a moment after the last strike
+            add(mix, load_sound(os.path.join(SOUNDS, 'Fx/bodyfallHVY.wav')), at - clip['mark'][1] + 1.7, 0.8)
         if name == 'attack':
             for sound, t, g in (('Fx/swoosh 1.wav', 0.4, 0.5), ('Fx/Medium Armor Hit.wav', 0.75, 0.55), ('Fx/swoosh 3.wav', 1.5, 0.5),
                                 ('Fx/Heavy Armor Hit.wav', 1.85, 0.55), ('Fx/swoosh 2.wav', 2.4, 0.5), ('Fx/body hit.wav', 2.7, 0.6)):
@@ -398,14 +432,30 @@ def main():
     ap.add_argument('--music')
     ap.add_argument('--only', choices=['16x9', '4x5'])
     ap.add_argument('--cut', choices=sorted(CUTS), default='0.1')
+    ap.add_argument('--extra', action='append', default=[], metavar='NAME=DIR', dest='extra_takes',
+                    help='another take, for the clips marked take=NAME')
     args = ap.parse_args()
     global EDIT, SUBTITLE
     cut = CUTS[args.cut]
     EDIT, SUBTITLE = cut['edit'], cut['subtitle']
-    frames_dir = os.path.abspath(os.path.join(args.take, 'userdata/screenshots'))
+    def load_take(path):
+        frames = os.path.abspath(os.path.join(path, 'userdata/screenshots'))
+        return dict(frames=frames, names=sorted(os.listdir(frames), key=lambda x: int(re.findall(r'\d+', x)[0])),
+                    shots=shots_from_log(os.path.join(path, 'stdout.log')), marks=marks_from_log(os.path.join(path, 'stdout.log')))
+    takes = {'main': load_take(args.take)}
     log = os.path.join(args.take, 'stdout.log')
-    names = sorted(os.listdir(frames_dir), key=lambda x: int(re.findall(r'\d+', x)[0]))
-    shots = shots_from_log(log)
+    for spec in args.extra_takes:
+        name, path = spec.split('=', 1)
+        takes[name] = load_take(path)
+    for clip in EDIT:
+        if clip.get('take', 'main') not in takes:
+            sys.exit('clip %s needs --extra %s=<dir>' % (clip['shot'], clip['take']))
+        t = takes[clip.get('take', 'main')]
+        if 'mark' in clip:
+            name, offset = clip['mark']
+            if name not in t['marks'].get(clip['shot'], {}):
+                sys.exit('shot %s has no mark %s' % (clip['shot'], name))
+            clip['start'] = (t['marks'][clip['shot']][name] - t['shots'][clip['shot']][0]) / FPS + offset
     os.makedirs(args.out, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.out) as tmp:
         total = sum(c['dur'] for c in EDIT) + CROSSFADE
@@ -414,7 +464,10 @@ def main():
         for label, size in (('16x9', (1920, 1080)), ('4x5', (1080, 1350))):
             if args.only and args.only != label:
                 continue
-            clips = [render_clip(i, c, frames_dir, names, shots, size, tmp) for i, c in enumerate(EDIT)]
+            clips = []
+            for i, c in enumerate(EDIT):
+                t = takes[c.get('take', 'main')]
+                clips.append(render_clip(i, c, t['frames'], t['names'], t['shots'], size, tmp))
             silent = os.path.join(tmp, label + '.mp4')
             join_clips(clips, size, silent, tmp)
             final = os.path.join(args.out, '%s-%s.mp4' % (cut['name'], label))

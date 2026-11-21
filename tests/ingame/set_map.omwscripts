@@ -1,0 +1,2 @@
+GLOBAL: scripts/tomorrowind_test/set_map_global.lua
+PLAYER: scripts/tomorrowind_test/set_map.lua

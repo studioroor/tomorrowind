@@ -2260,10 +2260,24 @@ local function debugCommand(e)
         needsMigration = true
     elseif e.cmd == 'grow' and c then
         -- test helper: hours of growth for every tree and crop at once
+        -- (keepFed: the settlers don't go hungry over those hours: time-lapses)
+        local fed = {}
+        if e.keepFed then for wid, w in pairs(c.workers) do fed[wid] = w.fed end end
         C.tick(c, 0, e.hours or 24)
+        for wid, f in pairs(fed) do if c.workers[wid] then c.workers[wid].fed = f end end
         processEvents()
         syncTrees(0, true)
         syncCrops(0, true)
+    elseif e.cmd == 'field' and c then
+        -- test helper: every farm's plots set to `grow` (nil: bare, as if
+        -- just harvested)
+        for _, sid in ipairs(c.siteOrder) do
+            local s = c.sites[sid]
+            if s.built and defs.buildings[s.kind].crops then
+                for _, p in ipairs(C.plotsOf(s)) do p.grow, p.tendedAt = e.grow, nil end
+                syncField(sid, true)
+            end
+        end
     elseif e.cmd == 'crops' and c then
         -- test helper: every farm's field, and whether its plants match it
         for _, sid in ipairs(c.siteOrder) do
