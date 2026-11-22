@@ -62,10 +62,18 @@ h2 { font: 22px/1 var(--display); color: var(--parch); margin: 0 0 6px; font-wei
 .block .lbl { font-size: 14px; }
 .block .sub { color: var(--parch-dim); font-size: 12px; }
 .block .prog { position: absolute; left: 0; bottom: 0; height: 3px; background: var(--parch); width: 0; }
-.block.drag { opacity: .4; }
-.block.drop-before { box-shadow: -4px 0 0 var(--gold); }
+.block.drag, .card.drag { opacity: .35; }
+.ghost { position: fixed; z-index: 50; pointer-events: none; opacity: .9; box-shadow: 0 8px 24px rgba(0,0,0,.5); transform: rotate(-1.5deg); margin: 0; }
+#dropMarker { position: absolute; z-index: 49; width: 4px; border-radius: 2px; background: var(--gold); pointer-events: none; display: none; }
+body.dragging, body.dragging * { cursor: grabbing !important; user-select: none; }
+.block, .card { touch-action: none; }
 .sel { border-color: var(--gold) !important; box-shadow: inset 0 0 0 1px var(--gold); }
 .now { background: #4a3f2c !important; }
+.palette { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.palette .lbl { color: var(--parch-dim); font-size: 13px; margin-right: 4px; }
+.pchip { font: 18px/1 var(--display); color: var(--gold); padding: 6px 12px; border: 1px solid var(--line); border-radius: 5px; background: var(--basalt); cursor: grab; }
+.pchip small { font: 12px var(--text); color: var(--parch-dim); margin-left: 6px; }
+.pchip.drag { opacity: .35; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
 .card { padding: 10px 12px; background: var(--basalt); border: 1px solid var(--line); border-radius: 6px; display: grid; gap: 6px; cursor: grab; }
 .card .sym { font: 30px/1 var(--display); color: var(--gold); }
@@ -174,6 +182,7 @@ input[type=range] { accent-color: var(--gold); }
     <label class="field" title="A section can have its own (Compose)"><span>Beats a bar</span><input type="number" id="bpb" min="2" max="8" step="1"></label>
     <div class="transport">
       <button class="btn primary" id="play">Play the song</button>
+      <button class="btn" id="playFrom" hidden></button>
       <button class="btn" id="stop">Stop</button>
       <button class="btn" id="loop" aria-pressed="false">Loop</button>
       <button class="btn" id="export">Export WAV</button>
@@ -191,8 +200,9 @@ input[type=range] { accent-color: var(--gold); }
   <div id="view-arrange" class="stack" hidden>
     <div>
       <h2>The song</h2>
-      <p class="hint">Each block plays a section. Drag blocks to change the order, or drag a section card in from below. Click a block to set who plays in it.</p>
+      <p class="hint">Each block plays a section. Drag blocks to change the order, and drag a section in from the row below. Click a block to set who plays in it; double-click to compose it.</p>
       <div class="strip" id="blocks"></div>
+      <div class="palette" id="palette"></div>
     </div>
     <div class="split">
       <div class="box" id="blockEdit"></div>
@@ -342,7 +352,21 @@ function setView(v) {
   if (v === 'arrange') drawArrange();
   if (v === 'band') drawTracks();
 }
-function playLabel() { $('#play').textContent = view === 'compose' ? 'Play section ' + cur().name : 'Play the song'; }
+function playLabel() {
+  $('#play').textContent = view === 'compose' ? 'Play section ' + cur().name : 'Play the song';
+  // the selected block: play from it (Arrange), or this section as it plays there (Compose)
+  const bl = song.arrangement[blockSel], pf = $('#playFrom');
+  const name = bl ? 'block ' + (blockSel + 1) + (bl.label ? ' (' + bl.label + ')' : '') : '';
+  if (view === 'compose') {
+    pf.hidden = !bl || bl.section !== secSel;
+    pf.textContent = 'As in ' + name;
+    pf.title = 'Section ' + cur().name + ' with the line-up and volumes of ' + name;
+  } else {
+    pf.hidden = !bl || blockSel === 0;
+    pf.textContent = 'From ' + name;
+    pf.title = 'The song from ' + name + ' to the end';
+  }
+}
 function bindHeader() {
   for (const b of document.querySelectorAll('.mode')) b.onclick = () => setView(b.dataset.mode);
   $('#songList').onchange = (e) => openSong(e.target.value);
@@ -365,6 +389,7 @@ function bindHeader() {
     keep(); status('A new song: give it a name and save it');
   };
   $('#play').onclick = () => play(view === 'compose' ? { kind: 'section', id: secSel } : { kind: 'song' });
+  $('#playFrom').onclick = () => play(view === 'compose' ? { kind: 'block', index: blockSel } : { kind: 'from', index: blockSel });
   $('#stop').onclick = stop;
   $('#loop').onclick = () => { looping = !looping; $('#loop').classList.toggle('on', looping); $('#loop').setAttribute('aria-pressed', looping); if (playing) play(mode); };
   $('#export').onclick = async () => {
@@ -398,40 +423,125 @@ function blockSummary(bl) {
   if ((+bl.slowTo || 1) < 1) parts.push('slows down');
   return parts.join(', ');
 }
-let dragFrom = null; // { block: i } or { section: id }
+function drawPalette() {
+  const box = $('#palette'); box.innerHTML = '';
+  box.appendChild(el('span', 'lbl', 'Drag into the song:'));
+  for (const s of song.sections) {
+    const c = el('button', 'pchip', s.name);
+    c.appendChild(el('small', '', bars(secBars(s))));
+    c.title = 'Drag into the song to add section ' + s.name + ' there (or click: at the end)';
+    c.onclick = () => { if (dragged()) return; song.arrangement.push({ section: s.id, repeat: 1 }); blockSel = song.arrangement.length - 1; keep(); drawArrange(); playLabel(); };
+    c.addEventListener('pointerdown', (e) => startDrag(e, c, { section: s.id, palette: true }));
+    box.appendChild(c);
+  }
+}
 function drawBlocks() {
+  drawPalette();
   const box = $('#blocks'); box.innerHTML = '';
   song.arrangement.forEach((bl, i) => {
     const t = el('button', 'block' + (i === blockSel ? ' sel' : ''));
     const sec = section(bl.section);
     t.append(el('span', 'sym', (sec ? sec.name : '?') + ((+bl.repeat || 1) > 1 ? ' ×' + bl.repeat : '')), el('span', 'lbl', bl.label || ''), el('span', 'sub', blockSummary(bl)), el('span', 'prog'));
-    t.draggable = true;
-    t.onclick = () => { blockSel = i; secSel = bl.section; drawBlocks(); drawBlockEdit(); };
+    t.onclick = () => { if (dragged()) return; blockSel = i; secSel = bl.section; drawBlocks(); drawBlockEdit(); playLabel(); };
     t.ondblclick = () => { secSel = bl.section; chordSel = -1; setView('compose'); };
     t.title = 'Drag to move. Double-click to compose this section.';
-    t.ondragstart = (e) => { dragFrom = { block: i }; t.classList.add('drag'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'block'); };
-    t.ondragend = () => { t.classList.remove('drag'); clearDrop(); };
-    t.ondragover = (e) => { e.preventDefault(); clearDrop(); t.classList.add('drop-before'); };
-    t.ondrop = (e) => { e.preventDefault(); e.stopPropagation(); dropAt(i); };
+    t.addEventListener('pointerdown', (e) => startDrag(e, t, { block: i }));
     box.appendChild(t);
   });
-  box.ondragover = (e) => { e.preventDefault(); box.classList.add('over'); };
-  box.ondragleave = () => box.classList.remove('over');
-  box.ondrop = (e) => { e.preventDefault(); dropAt(song.arrangement.length); };
 }
-function clearDrop() { document.querySelectorAll('.drop-before').forEach((x) => x.classList.remove('drop-before')); $('#blocks').classList.remove('over'); }
-function dropAt(i) {
-  clearDrop();
-  const a = song.arrangement;
-  if (dragFrom?.block !== undefined) {
-    const [b] = a.splice(dragFrom.block, 1);
-    const to = i > dragFrom.block ? i - 1 : i;
-    a.splice(to, 0, b); blockSel = to;
-  } else if (dragFrom?.section) {
-    a.splice(i, 0, { section: dragFrom.section, repeat: 1 }); blockSel = i;
+
+// Dragging blocks and section cards: the item follows the pointer, a gold
+// line shows where it lands (before or after the one you're over). Blocks
+// move within the song; a card moves among the cards, or goes into the song
+// where it's dropped there.
+let dragging = null, dragEndedAt = 0;
+function dragged() { return performance.now() - dragEndedAt < 250; }
+function startDrag(e, item, what) {
+  if (e.button !== 0 || e.target.closest('button') !== item && e.target.closest('button, input, select')) return;
+  dragging = { what, item, x0: e.clientX, y0: e.clientY, started: false };
+}
+// where among `items` (elements in a wrapping row) a pointer at x, y would
+// drop: the index to insert at
+function dropIndex(items, x, y) {
+  if (!items.length) return 0;
+  let best = 0, bestD = Infinity;
+  items.forEach((it, i) => {
+    const r = it.getBoundingClientRect();
+    const dx = x < r.left ? r.left - x : x > r.right ? x - r.right : 0;
+    const dy = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+    const d = dx * dx + dy * dy * 4;
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  const r = items[best].getBoundingClientRect();
+  return x > r.left + r.width / 2 ? best + 1 : best;
+}
+function showMarker(items, index, container) {
+  let m = $('#dropMarker');
+  if (!m) { m = el('div'); m.id = 'dropMarker'; document.body.appendChild(m); }
+  if (index < 0) { m.style.display = 'none'; return; }
+  const ref = items[Math.min(index, items.length - 1)], r = ref ? ref.getBoundingClientRect() : container.getBoundingClientRect();
+  const x = !ref ? r.left + 8 : index >= items.length ? r.right + 4 : r.left - 5;
+  Object.assign(m.style, { display: 'block', left: (x - 2 + scrollX) + 'px', top: (r.top + scrollY) + 'px', height: r.height + 'px' });
+}
+let scrollTimer = null;
+function autoScroll(y) {
+  clearInterval(scrollTimer); scrollTimer = null;
+  const top = $('header').getBoundingClientRect().bottom;
+  const v = y < top + 50 ? -14 : y > innerHeight - 50 ? 14 : 0;
+  if (v) scrollTimer = setInterval(() => { if (dragging) scrollBy(0, v); else clearInterval(scrollTimer); }, 16);
+}
+document.addEventListener('pointermove', (e) => {
+  const d = dragging;
+  if (!d) return;
+  if (d.started) autoScroll(e.clientY);
+  if (!d.started) {
+    if (Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 6) return;
+    d.started = true;
+    const r = d.item.getBoundingClientRect();
+    d.ghost = d.item.cloneNode(true);
+    d.ghost.classList.add('ghost');
+    Object.assign(d.ghost.style, { width: r.width + 'px', height: r.height + 'px' });
+    d.dx = e.clientX - r.left; d.dy = e.clientY - r.top;
+    document.body.appendChild(d.ghost);
+    d.item.classList.add('drag');
+    document.body.classList.add('dragging');
   }
-  dragFrom = null; keep(); drawArrange();
-}
+  d.ghost.style.left = (e.clientX - d.dx) + 'px';
+  d.ghost.style.top = (e.clientY - d.dy) + 'px';
+  // over the song's row of blocks, or over the cards?
+  const strip = $('#blocks'), cards = $('#cards');
+  const inside = (elm) => { const r = elm.getBoundingClientRect(); return e.clientX >= r.left - 20 && e.clientX <= r.right + 20 && e.clientY >= r.top - 20 && e.clientY <= r.bottom + 20; };
+  const blocks = [...strip.querySelectorAll('.block')], cardEls = [...cards.querySelectorAll('.card:not(.new)')];
+  d.target = null;
+  if (inside(strip)) { d.target = { where: 'song', index: dropIndex(blocks, e.clientX, e.clientY) }; showMarker(blocks, d.target.index, strip); }
+  else if (d.what.section && !d.what.palette && inside(cards)) { d.target = { where: 'cards', index: dropIndex(cardEls, e.clientX, e.clientY) }; showMarker(cardEls, d.target.index, cards); }
+  else showMarker([], -1);
+  strip.classList.toggle('over', d.target?.where === 'song');
+});
+document.addEventListener('pointerup', () => {
+  const d = dragging;
+  dragging = null;
+  if (!d || !d.started) return;
+  dragEndedAt = performance.now();
+  clearInterval(scrollTimer); scrollTimer = null;
+  d.ghost.remove(); d.item.classList.remove('drag'); document.body.classList.remove('dragging');
+  showMarker([], -1); $('#blocks').classList.remove('over');
+  const t = d.target;
+  if (!t) return;
+  if (d.what.block !== undefined && t.where === 'song') {
+    const a = song.arrangement, from = d.what.block;
+    const [b] = a.splice(from, 1);
+    const to = t.index > from ? t.index - 1 : t.index;
+    a.splice(to, 0, b); blockSel = to;
+  } else if (d.what.section && t.where === 'song') {
+    song.arrangement.splice(t.index, 0, { section: d.what.section, repeat: 1 }); blockSel = t.index;
+  } else if (d.what.section && t.where === 'cards') {
+    const list = song.sections, from = list.findIndex((s) => s.id === d.what.section);
+    const [s] = list.splice(from, 1);
+    list.splice(t.index > from ? t.index - 1 : t.index, 0, s);
+  } else return;
+  keep(); drawArrange(); playLabel();
+});
 function chips(parent, label, items, isOn, pick) {
   const r = el('div', 'row'); r.appendChild(el('span', 'label', label));
   for (const [v, text, title] of items) {
@@ -501,7 +611,7 @@ function drawFeel() {
 function drawCards() {
   const box = $('#cards'); box.innerHTML = '';
   for (const s of song.sections) {
-    const c = el('div', 'card'); c.draggable = true;
+    const c = el('div', 'card');
     const used = song.arrangement.filter((b) => b.section === s.id).length;
     const chordsTxt = s.chords.slice(0, 6).map(chordSym).join(' ') + (s.chords.length > 6 ? ' …' : '');
     c.append(el('span', 'sym', s.name), el('span', 'sub', bars(secBars(s)) + ', ' + (s.melody?.length || 0) + ' melody notes, ' + (used ? 'in the song ' + used + '×' : 'not in the song yet')), el('span', 'sub', chordsTxt));
@@ -513,8 +623,8 @@ function drawCards() {
       button('Rename', () => renameSection(s)),
       button('Remove', () => removeSection(s), 'btn small danger'));
     c.appendChild(acts);
-    c.ondragstart = (e) => { dragFrom = { section: s.id }; e.dataTransfer.effectAllowed = 'copy'; e.dataTransfer.setData('text/plain', 'section'); };
-    c.ondragend = clearDrop;
+    c.title = 'Drag to change the order of the sections, or into the song above to add it there';
+    c.addEventListener('pointerdown', (e) => startDrag(e, c, { section: s.id }));
     box.appendChild(c);
   }
   const n = el('button', 'card new', '+ New section');
@@ -552,7 +662,13 @@ function drawSecbar() {
   box.lastChild.style.margin = '0 4px 0 0';
   for (const s of song.sections) {
     const b = el('button', 'tab' + (s.id === secSel ? ' sel' : ''), s.name);
-    b.onclick = () => { secSel = s.id; chordSel = -1; drawCompose(); centreRoll(); playLabel(); };
+    b.onclick = () => {
+      secSel = s.id; chordSel = -1;
+      // the selected block follows: the first one that plays this section
+      const i = song.arrangement.findIndex((bl) => bl.section === s.id);
+      if (i >= 0 && song.arrangement[blockSel]?.section !== s.id) blockSel = i;
+      drawCompose(); centreRoll(); playLabel();
+    };
     box.appendChild(b);
   }
   box.append(

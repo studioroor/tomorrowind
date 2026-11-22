@@ -26,7 +26,10 @@ Switch at the top (or press 1, 2, 3):
   plays a section a number of times with its own line-up: switch tracks
   (and the drums) on or off and set how loud they are, to build up or thin
   out. A block can fade in, fade out, or slow down towards its end. Drag
-  blocks to reorder them, drag a section card in to add it. Here too: the
+  blocks to reorder them, drag a section in (from the row under the song,
+  or a card) to add it; drag the cards to put the sections in order. With a
+  block selected, "From block N" plays the song from there, and in Compose
+  "As in block N" plays the section with that block's line-up. Here too: the
   **feel** for the whole song (rubato: the tempo breathes and broadens at
   the end of a phrase; human: notes a little off the grid, not all equally
   loud, chords slightly strummed; swing: off-beats come late), and the
