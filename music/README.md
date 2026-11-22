@@ -18,6 +18,46 @@ tools/music/studio.py          # then open http://127.0.0.1:8765
   `tools/music/synth.py`).
 - Space plays and stops. Changes made while it plays are heard a moment later.
 
+## A song: three views
+
+Switch at the top (or press 1, 2, 3):
+
+- **Arrange**: the song from start to end, as a row of blocks. Each block
+  plays a section a number of times with its own line-up: switch tracks
+  (and the drums) on or off and set how loud they are, to build up or thin
+  out. A block can fade in, fade out, or slow down towards its end. Drag
+  blocks to reorder them, drag a section card in to add it. Here too: the
+  **feel** for the whole song (rubato: the tempo breathes and broadens at
+  the end of a phrase; human: notes a little off the grid, not all equally
+  loud, chords slightly strummed; swing: off-beats come late), and the
+  sections as cards (add to the song, copy, rename, remove).
+- **Compose**: one section at a time, its chords, melody and drums in
+  panels that fold away (folded, they still show the line-up, the chords,
+  the melody's contour and the drum patterns). Play plays this section. A
+  section can have its own **time signature** (beats a bar).
+- **The melody**: click an empty spot for a note, double-click a note to
+  take it away. Click notes to select them (Shift for more) or drag a box
+  around them; drag to move, with Option to copy; drag a note's right edge
+  to make it longer. Keys: Delete, arrows (Shift+↑↓ an octave), ⌘C ⌘V,
+  ⌘D duplicate, ⌘A all. Note lengths from a quarter beat, **dotted** too;
+  the octave buttons move or copy the selection (or the whole melody). **Who plays what** gives a
+  track another part in this section (the harp on the melody in A, on
+  arpeggios in B, the strings taking the melody) or lets it rest; a track
+  you don't change plays its usual part from the Band. The ⌒ on a track is
+  **legato**: each note runs on into the next. Set it for the whole song in
+  the Band, for a section in Compose, or for one block in Arrange. A chord can have another
+  note in the bass (G/B). The drums show only the ones the section uses
+  (add one, or show all twelve: low drum, toms, hand drums, tambourine,
+  shaker, triangle, cymbal, wood block, timpani on the chord's root).
+- **Band**: the tracks, the same in every section: what each plays (chords,
+  bass, melody or arpeggio) and how it sounds. When the next chord has the
+  same notes, chords and bass hold them on rather than striking them again
+  (switch a track to "play again" for a pulse): a section of D chords gets
+  one long D in the bass, and a pedal note under changing chords is the
+  chords' bass note (C/D).
+
+Songs from before sections open as one section, A, in one block.
+
 ## Setting up
 
 The studio needs Python with numpy. The instruments also need fluidsynth and

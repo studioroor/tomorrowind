@@ -9,6 +9,7 @@ Songs are saved in music/songs/<name>.json, exports go to music/out/<name>.wav
 Needs numpy, and fluidsynth with the SoundFont for the instruments (see
 music/README.md). Only listens on this computer.
 """
+import importlib
 import json
 import os
 import re
@@ -26,6 +27,21 @@ OUT = os.path.join(synth.REPO, 'music', 'out')
 FONT = '/Applications/OpenMW 0.52 RC1/OpenMW.app/Contents/Resources/resources/vfs/fonts/MysticCards.ttf'
 
 
+_synth_mtime = os.path.getmtime(synth.__file__)
+
+
+def fresh_synth():
+    """The engine as it is on disk now: picked up again when it changed, so a
+    running studio never plays with an old one."""
+    global _synth_mtime
+    m = os.path.getmtime(synth.__file__)
+    if m != _synth_mtime:
+        importlib.reload(synth)
+        _synth_mtime = m
+        print('reloaded the music engine', flush=True)
+    return synth
+
+
 def safe_name(name):
     name = re.sub(r'[^a-zA-Z0-9_-]+', '-', (name or '').strip()).strip('-').lower()
     return name or 'untitled'
@@ -35,7 +51,7 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         pass
 
-    def send(self, code, body, kind='application/json'):
+    def send(self, code, body, kind='application/json', extra=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body).encode()
         elif isinstance(body, str):
@@ -44,6 +60,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', kind)
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-store')
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
@@ -68,6 +86,7 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(n) or b'{}')
 
     def do_GET(self):
+        fresh_synth()
         if not self.allowed():
             return self.send(403, {'error': 'Open the studio at http://127.0.0.1:%d' % PORT})
         path = self.path.split('?')[0]
@@ -82,6 +101,7 @@ class Handler(BaseHTTPRequestHandler):
                 'notes': synth.NOTE_NAMES, 'qualities': list(synth.QUALITIES), 'voicings': synth.VOICINGS,
                 'instruments': synth.INSTRUMENTS, 'waves': list(synth.WAVES),
                 'pad': synth.PAD_DEFAULTS, 'pluck': synth.PLUCK_DEFAULTS, 'instrument': synth.INSTRUMENT_DEFAULTS,
+                'drums': [[k, synth.DRUMS[k][0]] for k in synth.DRUM_ORDER], 'feel': synth.FEEL_DEFAULTS,
                 'soundfont': os.path.exists(synth.SOUNDFONT),
             })
         if path == '/api/songs':
@@ -92,18 +112,24 @@ class Handler(BaseHTTPRequestHandler):
             if not os.path.exists(p):
                 return self.send(404, {'error': 'No song by that name'})
             with open(p) as f:
-                return self.send(200, json.load(f))
+                return self.send(200, synth.normalize(json.load(f)))
         self.send(404, {'error': 'Not found'})
 
     def do_POST(self):
+        fresh_synth()
         if not self.allowed(post=True):
             return self.send(403, {'error': 'Only the studio page can do that'})
         path = self.path.split('?')[0]
         try:
             data = self.body()
             if path == '/api/render':
-                mix = synth.master(synth.render(data['song'], loop=bool(data.get('loop'))))
-                return self.send(200, synth.wav_bytes(mix), 'audio/wav')
+                info = {}
+                mix = synth.master(synth.render(data['song'], loop=bool(data.get('loop')), info=info))
+                # where each block starts, and when each beat falls (the tempo
+                # breathes and slows down): for the playhead
+                return self.send(200, synth.wav_bytes(mix), 'audio/wav', {'X-Timeline': json.dumps(info, separators=(',', ':'))})
+            if path == '/api/normalize':
+                return self.send(200, synth.normalize(data['song']))
             if path == '/api/save':
                 song = data['song']
                 song['name'] = safe_name(song.get('name'))
@@ -126,7 +152,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     server = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
-    print('Tomorrowind studio: http://127.0.0.1:%d  (Ctrl+C to stop)' % PORT)
+    print('Tomorrowind studio: http://127.0.0.1:%d  (Ctrl+C to stop)' % PORT, flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
