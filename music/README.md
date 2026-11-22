@@ -29,7 +29,8 @@ Switch at the top (or press 1, 2, 3):
 - **Arrange**: the song from start to end, as a row of blocks. Each block
   plays a section a number of times with its own line-up: switch tracks
   (and the drums) on or off and set how loud they are, to build up or thin
-  out. A block can fade in, fade out, or slow down towards its end. Drag
+  out. A block can fade in, fade out, or slow down towards its end (over
+  the whole block, or its last bars). Drag
   blocks to reorder them, drag a section in (from the row under the song,
   or a card) to add it; drag the cards to put the sections in order. With a
   block selected, "From block N" plays the song from there, and in Compose

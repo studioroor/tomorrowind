@@ -476,7 +476,7 @@ function blockSummary(bl) {
     : on.length <= 3 ? on.map(trackName).join(' + ') : on.length + ' of ' + song.tracks.length + ' tracks');
   if (+bl.fadeIn) parts.push('fades in');
   if (+bl.fadeOut) parts.push('fades out');
-  if ((+bl.slowTo || 1) < 1) parts.push('slows down');
+  if ((+bl.slowTo || 1) < 1) parts.push(+bl.slowOver ? 'slows down over ' + bars(+bl.slowOver) : 'slows down');
   return parts.join(', ');
 }
 function drawPalette() {
@@ -648,6 +648,8 @@ function drawBlockEdit() {
   chips(ed, 'Fade out', [[0, 'no'], [1, '1 bar'], [2, '2'], [4, '4'], [8, '8']], (v) => (+bl.fadeOut || 0) === v, (v) => { bl.fadeOut = v; redraw(); });
   chips(ed, 'Slow down', [[1, 'no'], [0.9, 'a little'], [0.75, 'to ¾'], [0.6, 'to 60%'], [0.45, 'a lot']], (v) => Math.abs((+bl.slowTo || 1) - v) < 1e-6,
     (v) => { bl.slowTo = v; redraw(); }).title = 'The tempo eases down to this by the end of the block';
+  if ((+bl.slowTo || 1) < 1) chips(ed, 'Slowing over', [[0, 'the whole block'], [1, 'last bar'], [2, '2'], [4, '4'], [8, '8']], (v) => (+bl.slowOver || 0) === v,
+    (v) => { if (v) bl.slowOver = v; else delete bl.slowOver; redraw(); }).title = 'How many bars at the end of the block the slow-down takes';
   const wr = el('div', 'row'); wr.appendChild(el('span', 'label', 'Who plays'));
   wr.append(button('Everyone', () => { bl.mix = {}; redraw(); }, 'chip'),
     button('Nobody', () => { bl.mix = Object.fromEntries([...song.tracks.map((t) => [t.id, { on: false }]), ['drums', { on: false }]]); redraw(); }, 'chip'));

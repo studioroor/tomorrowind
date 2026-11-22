@@ -180,9 +180,11 @@ def pluck_events(out, events, p):
 # chord gives the same notes, rather than striking them again.
 #     "arrangement": [ {"section": "A", "repeat": 1, "label": "harp only",
 #                       "mix": {"<track id>": {"on": true, "volume": 1}, "drums": {..}},
-#                       "fadeIn": 0, "fadeOut": 0, "slowTo": 1} ],     fades in bars; slowTo: the tempo
-#     "tracks": [ {"id": "t1", "type": .., ..} ]                        at the block's end, as a share
+#                       "fadeIn": 0, "fadeOut": 0, "slowTo": 1, "slowOver": 0} ],
+#     "tracks": [ {"id": "t1", "type": .., ..} ]
 #   }
+# (fades in bars; slowTo: the tempo at the block's end, as a share, reached
+# over its last slowOver bars, or the whole block when 0)
 # A chord: {"root": "G", "octave": 3, "quality": "", "voicing": "close", "bars": 1, "bass": "B",
 #           "rest": ["t2", "drums"]}
 # (bass: a note under the chord other than its root: G/B; rest: tracks, or the
@@ -332,10 +334,16 @@ class Clock:
                 near = np.clip(1 - np.abs(b - (end - 0.5)) / 1.2, 0, 1)
                 factor *= 1 - rubato * 0.14 * near ** 2
         for x in blocks:
-            slow = float(song['arrangement'][x['index']].get('slowTo', 1) or 1)
+            bl = song['arrangement'][x['index']]
+            slow = float(bl.get('slowTo', 1) or 1)
             if slow < 1:
-                inside = (b >= x['start']) & (b < x['start'] + x['beats'])
-                prog = (b - x['start']) / max(1e-6, x['beats'])
+                # over the block's last `slowOver` bars (0: the whole block)
+                over = float(bl.get('slowOver', 0) or 0)
+                sec = next(s for s in song['sections'] if s['id'] == x['section'])
+                span = min(x['beats'], over * section_bpb(song, sec)) if over > 0 else x['beats']
+                s0 = x['start'] + x['beats'] - span
+                inside = (b >= s0) & (b < x['start'] + x['beats'])
+                prog = (b - s0) / max(1e-6, span)
                 factor = np.where(inside, factor * (1 - (1 - slow) * prog ** 2), factor)
                 # after the slow-down: the last tempo holds for the tail
                 after = b >= x['start'] + x['beats']
