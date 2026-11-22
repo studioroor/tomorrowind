@@ -166,6 +166,21 @@ canvas { display: block; cursor: crosshair; }
 input[type=range] { accent-color: var(--gold); }
 .small { padding: 3px 9px; font-size: 13px; }
 .danger:hover { border-color: #e39b8a; color: #e39b8a; }
+/* the command bar (⌘K) and right-click menus */
+.overlay { position: fixed; inset: 0; z-index: 100; background: rgba(20,17,15,.55); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
+.cmdbox { width: min(620px, 92vw); background: var(--basalt); border: 1px solid var(--gold); border-radius: 8px; box-shadow: 0 16px 48px rgba(0,0,0,.6); padding: 10px; display: grid; gap: 8px; }
+.cmdbox input { width: 100%; font-size: 17px; padding: 9px 12px; }
+.cmdbox ul { list-style: none; margin: 0; padding: 0; max-height: 52vh; overflow: auto; }
+.cmdbox li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border-radius: 5px; cursor: pointer; }
+.cmdbox li.on { background: #4a3f2c; }
+.cmdbox li kbd, .ctxmenu kbd { font: 12px var(--text); color: var(--parch-dim); }
+.cmdbox .hint { margin: 0; }
+.ctxmenu { position: fixed; z-index: 101; min-width: 220px; background: var(--basalt); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,.55); padding: 5px; }
+.ctxmenu .ttl { font: 15px var(--display); color: var(--gold); padding: 4px 10px 6px; }
+.ctxmenu button { display: flex; justify-content: space-between; gap: 14px; width: 100%; text-align: left; background: none; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+.ctxmenu button:hover, .ctxmenu button:focus-visible { background: #4a3f2c; outline: none; }
+.ctxmenu button.danger:hover { color: #e39b8a; }
+.ctxmenu hr { border: none; border-top: 1px solid var(--line); margin: 4px 2px; }
 @media (max-width: 700px) { header { position: static; } .transport { margin-left: 0; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -178,6 +193,7 @@ input[type=range] { accent-color: var(--gold); }
     <label class="field"><span>Name</span><input type="text" id="name" size="14"></label>
     <button class="btn" id="save">Save</button>
     <button class="btn" id="newSong">New song</button>
+    <button class="btn" id="openCmd" title="Commands, and the keyboard shortcuts (?)">⌘K</button>
     <label class="field"><span>Tempo</span><input type="number" id="bpm" min="20" max="240" step="1"></label>
     <label class="field" title="A section can have its own (Compose)"><span>Beats a bar</span><input type="number" id="bpb" min="2" max="8" step="1"></label>
     <div class="transport">
@@ -195,6 +211,14 @@ input[type=range] { accent-color: var(--gold); }
     <button class="mode" data-mode="band">Band<small>the tracks and their sounds</small></button>
   </nav>
 </header>
+<div id="cmdk" class="overlay" hidden>
+  <div class="cmdbox" role="dialog" aria-label="Commands">
+    <input id="cmdInput" type="text" placeholder="Type what you want to do: play, compose B, add C, save…" autocomplete="off">
+    <ul id="cmdList" role="listbox"></ul>
+    <p class="hint">↑↓ to choose · Enter to do it · Esc to close · ⌘K to open</p>
+  </div>
+</div>
+<div id="ctx" class="ctxmenu" hidden role="menu"></div>
 <main>
   <!-- arrange -->
   <div id="view-arrange" class="stack" hidden>
@@ -320,8 +344,43 @@ function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.
 function button(text, fn, cls = 'btn small') { const b = el('button', cls, text); b.onclick = fn; return b; }
 
 // ---------------------------------------------------------------- keeping it
-function keep() { try { localStorage.setItem('tmw-studio-draft', JSON.stringify(song)); } catch (e) {} changed(); }
+function keep() { try { localStorage.setItem('tmw-studio-draft', JSON.stringify(song)); } catch (e) {} changed(); scheduleSnap(); }
+// Undo (⌘Z) and redo (⇧⌘Z): the song as it was, a step at a time. A step is
+// what changed before things settled for a moment (a whole drag is one).
+let history = [], future = [], lastSnap = null, snapT = null;
+function scheduleSnap() { clearTimeout(snapT); snapT = setTimeout(snapshot, 350); }
+function snapshot() {
+  clearTimeout(snapT);
+  const j = JSON.stringify(song);
+  if (j === lastSnap) return;
+  if (lastSnap) { history.push(lastSnap); if (history.length > 300) history.shift(); }
+  lastSnap = j; future = [];
+}
+function restore(j) {
+  song = JSON.parse(j);
+  try { localStorage.setItem('tmw-studio-draft', j); } catch (e) {}
+  blockSel = Math.min(blockSel, song.arrangement.length - 1);
+  if (!section(secSel)) secSel = song.sections[0].id;
+  chordSel = -1; sel = new Set();
+  drawAll(); changed();
+}
+function undo() {
+  snapshot();
+  if (!history.length) return status('Nothing to undo');
+  future.push(lastSnap); lastSnap = history.pop(); restore(lastSnap); status('Undone');
+}
+function redo() {
+  if (!future.length) return status('Nothing to redo');
+  history.push(lastSnap); lastSnap = future.pop(); restore(lastSnap); status('Redone');
+}
 function keepUi() { try { localStorage.setItem('tmw-studio-ui', JSON.stringify({ ...ui, view })); } catch (e) {} }
+async function saveSong() {
+  const r = await (await fetch('/api/save', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ song }) })).json();
+  if (r.error) return status(r.error, true);
+  song.name = r.name; $('#name').value = r.name;
+  await loadSongList(r.name);
+  status('Saved as music/songs/' + r.name + '.json');
+}
 async function normalize(s) { return (await fetch('/api/normalize', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ song: s }) })).json(); }
 async function loadSongList(pick) {
   const names = await (await fetch('/api/songs')).json();
@@ -337,6 +396,7 @@ async function openSong(name) {
 }
 function useSong(s) {
   song = s;
+  history = []; future = []; lastSnap = JSON.stringify(song);
   blockSel = 0; chordSel = -1;
   secSel = song.arrangement[0]?.section || song.sections[0].id;
   drawAll();
@@ -374,13 +434,7 @@ function bindHeader() {
   for (const [id, key] of [['#bpm', 'bpm'], ['#bpb', 'beatsPerBar']]) {
     $(id).onchange = (e) => { song[key] = Math.max(+e.target.min, Math.min(+e.target.max, +e.target.value || +e.target.min)); e.target.value = song[key]; keep(); drawAll(); };
   }
-  $('#save').onclick = async () => {
-    const r = await (await fetch('/api/save', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ song }) })).json();
-    if (r.error) return status(r.error, true);
-    song.name = r.name; $('#name').value = r.name;
-    await loadSongList(r.name);
-    status('Saved as music/songs/' + r.name + '.json');
-  };
+  $('#save').onclick = saveSong;
   $('#newSong').onclick = () => {
     const pad = Object.assign({ id: 't1', type: 'pad', part: 'chords', volume: 1, octave: 0 }, setup.pad);
     useSong({ name: 'new-song', bpm: 60, beatsPerBar: 4, feel: { ...setup.feel },
@@ -388,6 +442,7 @@ function bindHeader() {
       arrangement: [{ section: 'A', repeat: 1 }], tracks: [pad] });
     keep(); status('A new song: give it a name and save it');
   };
+  $('#openCmd').onclick = () => openCommands();
   $('#play').onclick = () => play(view === 'compose' ? { kind: 'section', id: secSel } : { kind: 'song' });
   $('#playFrom').onclick = () => play(view === 'compose' ? { kind: 'block', index: blockSel } : { kind: 'from', index: blockSel });
   $('#stop').onclick = stop;
@@ -432,6 +487,7 @@ function drawPalette() {
     c.title = 'Drag into the song to add section ' + s.name + ' there (or click: at the end)';
     c.onclick = () => { if (dragged()) return; song.arrangement.push({ section: s.id, repeat: 1 }); blockSel = song.arrangement.length - 1; keep(); drawArrange(); playLabel(); };
     c.addEventListener('pointerdown', (e) => startDrag(e, c, { section: s.id, palette: true }));
+    c.oncontextmenu = (e) => sectionMenu(e, s);
     box.appendChild(c);
   }
 }
@@ -446,6 +502,7 @@ function drawBlocks() {
     t.ondblclick = () => { secSel = bl.section; chordSel = -1; setView('compose'); };
     t.title = 'Drag to move. Double-click to compose this section.';
     t.addEventListener('pointerdown', (e) => startDrag(e, t, { block: i }));
+    t.oncontextmenu = (e) => blockMenu(e, i);
     box.appendChild(t);
   });
 }
@@ -625,6 +682,7 @@ function drawCards() {
     c.appendChild(acts);
     c.title = 'Drag to change the order of the sections, or into the song above to add it there';
     c.addEventListener('pointerdown', (e) => startDrag(e, c, { section: s.id }));
+    c.oncontextmenu = (e) => sectionMenu(e, s);
     box.appendChild(c);
   }
   const n = el('button', 'card new', '+ New section');
@@ -662,6 +720,7 @@ function drawSecbar() {
   box.lastChild.style.margin = '0 4px 0 0';
   for (const s of song.sections) {
     const b = el('button', 'tab' + (s.id === secSel ? ' sel' : ''), s.name);
+    b.oncontextmenu = (e) => sectionMenu(e, s);
     b.onclick = () => {
       secSel = s.id; chordSel = -1;
       // the selected block follows: the first one that plays this section
@@ -1349,13 +1408,171 @@ function blip(p) {
   o.connect(g).connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.55);
 }
 document.addEventListener('keydown', (e) => {
+  const mod = e.metaKey || e.ctrlKey, k = e.key.toLowerCase();
+  // these work everywhere
+  if (mod && k === 's') { e.preventDefault(); saveSong(); return; }
+  if (mod && k === 'k') { e.preventDefault(); $('#cmdk').hidden ? openCommands() : closeCommands(); return; }
+  if (!$('#cmdk').hidden || !$('#ctx').hidden) return; // their own keys
   if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+  if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
+  if (mod && k === 'y') { e.preventDefault(); redo(); return; }
+  if (e.key === '?') { e.preventDefault(); openCommands('keys'); return; }
   if (melodyKeys(e)) return;
   if (e.code === 'Space') { e.preventDefault(); playing ? stop() : $('#play').click(); }
   if (e.key === '1') setView('arrange');
   if (e.key === '2') setView('compose');
   if (e.key === '3') setView('band');
 });
+
+// ---------------------------------------------------------------- the command bar (⌘K)
+function commands() {
+  const list = [];
+  const add = (label, run, key = '') => list.push({ label, run, key });
+  add('Play the song', () => play({ kind: 'song' }), 'Space');
+  add('Stop', stop);
+  add('Loop ' + (looping ? 'off' : 'on'), () => $('#loop').click());
+  add('Save', saveSong, '⌘S');
+  add('Undo', undo, '⌘Z');
+  add('Redo', redo, '⇧⌘Z');
+  add('Export WAV', () => $('#export').click());
+  add('Go to Arrange', () => setView('arrange'), '1');
+  add('Go to Compose', () => setView('compose'), '2');
+  add('Go to Band', () => setView('band'), '3');
+  for (const s of song.sections) {
+    add('Compose section ' + s.name, () => { secSel = s.id; chordSel = -1; setView('compose'); });
+    add('Play section ' + s.name, () => play({ kind: 'section', id: s.id }));
+    add('Add section ' + s.name + ' to the song', () => { song.arrangement.push({ section: s.id, repeat: 1 }); blockSel = song.arrangement.length - 1; keep(); drawArrange(); });
+  }
+  song.arrangement.forEach((bl, i) => {
+    const name = 'block ' + (i + 1) + ' (' + (section(bl.section)?.name || '?') + (bl.label ? ', ' + bl.label : '') + ')';
+    add('Play ' + name, () => play({ kind: 'block', index: i }));
+    add('Play the song from ' + name, () => play({ kind: 'from', index: i }));
+  });
+  add('New section', () => { const s = newSection(); secSel = s.id; chordSel = -1; setView('compose'); });
+  add('Copy section ' + cur().name, () => { const c = copySection(cur()); secSel = c.id; drawAll(); });
+  add('Rename section ' + cur().name, () => renameSection(cur()));
+  add('Fold all panels', () => foldAll(true));
+  add('Unfold all panels', () => foldAll(false));
+  add('New song', () => $('#newSong').click());
+  for (const o of $('#songList').options) add('Open song ' + o.value, () => openSong(o.value));
+  return list;
+}
+const KEYS_HELP = [
+  ['Play or stop', 'Space'], ['Save', '⌘S'], ['Commands', '⌘K'], ['Undo / redo', '⌘Z / ⇧⌘Z'], ['Arrange / Compose / Band', '1 / 2 / 3'],
+  ['Melody: select all', '⌘A'], ['Melody: copy, paste, duplicate', '⌘C ⌘V ⌘D'], ['Melody: move a step / a semitone', '← → / ↑ ↓'],
+  ['Melody: an octave', '⇧↑ ⇧↓'], ['Melody: remove the selected notes', 'Delete'], ['Melody: copy while dragging', 'Option'],
+  ['Right-click a block or a section', 'its options'], ['These keys', '?'],
+];
+let cmdItems = [], cmdOn = 0;
+function openCommands(mode) {
+  closeMenu();
+  $('#cmdk').hidden = false;
+  const input = $('#cmdInput');
+  input.value = '';
+  input.placeholder = mode === 'keys' ? 'The keyboard shortcuts (type to run a command instead)' : 'Type what you want to do: play, compose B, add C, save…';
+  drawCommands(mode === 'keys');
+  input.focus();
+}
+function closeCommands() { $('#cmdk').hidden = true; }
+function drawCommands(keys) {
+  const q = $('#cmdInput').value.toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const ul = $('#cmdList'); ul.innerHTML = '';
+  if (keys && !q.length) {
+    cmdItems = [];
+    for (const [what, key] of KEYS_HELP) { const li = el('li'); li.append(el('span', '', what), el('kbd', '', key)); ul.appendChild(li); }
+    return;
+  }
+  cmdItems = commands().filter((c) => q.every((w) => c.label.toLowerCase().includes(w))).slice(0, 14);
+  cmdOn = Math.min(cmdOn, Math.max(0, cmdItems.length - 1));
+  if (!cmdItems.length) ul.appendChild(el('li', '', 'Nothing by that name'));
+  cmdItems.forEach((c, i) => {
+    const li = el('li', i === cmdOn ? 'on' : ''); li.setAttribute('role', 'option');
+    li.append(el('span', '', c.label), el('kbd', '', c.key));
+    li.onclick = () => runCommand(i);
+    li.onmousemove = () => { if (cmdOn !== i) { cmdOn = i; drawCommands(); } };
+    ul.appendChild(li);
+  });
+}
+function runCommand(i) { const c = cmdItems[i]; if (!c) return; closeCommands(); c.run(); }
+$('#cmdInput').addEventListener('input', () => { cmdOn = 0; drawCommands(); });
+$('#cmdInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.preventDefault(); closeCommands(); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); cmdOn = Math.min(cmdOn + 1, cmdItems.length - 1); drawCommands(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); cmdOn = Math.max(cmdOn - 1, 0); drawCommands(); }
+  else if (e.key === 'Enter') { e.preventDefault(); runCommand(cmdOn); }
+});
+$('#cmdk').addEventListener('pointerdown', (e) => { if (e.target.id === 'cmdk') closeCommands(); });
+function foldAll(closed) {
+  for (const p of document.querySelectorAll('.panel')) { ui.closed[p.dataset.panel] = closed; p.classList.toggle('closed', closed); }
+  keepUi(); if (!closed) { drawRoll(); drawDrums(); } peeks();
+}
+
+// ---------------------------------------------------------------- right-click menus
+function showMenu(e, title, items) {
+  e.preventDefault();
+  const m = $('#ctx'); m.innerHTML = '';
+  if (title) m.appendChild(el('div', 'ttl', title));
+  for (const it of items) {
+    if (!it) { m.appendChild(el('hr')); continue; }
+    const b = el('button', it.danger ? 'danger' : '');
+    b.setAttribute('role', 'menuitem');
+    b.append(el('span', '', it.label), el('kbd', '', it.key || ''));
+    b.onclick = () => { closeMenu(); it.run(); };
+    m.appendChild(b);
+  }
+  m.hidden = false;
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(e.clientX, innerWidth - r.width - 8) + 'px';
+  m.style.top = Math.min(e.clientY, innerHeight - r.height - 8) + 'px';
+  m.querySelector('button')?.focus();
+}
+function closeMenu() { $('#ctx').hidden = true; }
+document.addEventListener('pointerdown', (e) => { if (!$('#ctx').hidden && !e.target.closest('#ctx')) closeMenu(); });
+document.addEventListener('keydown', (e) => {
+  if ($('#ctx').hidden) return;
+  const items = [...$('#ctx').querySelectorAll('button')], i = items.indexOf(document.activeElement);
+  if (e.key === 'Escape') { e.preventDefault(); closeMenu(); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+});
+addEventListener('scroll', closeMenu, true);
+function blockMenu(e, i) {
+  const bl = song.arrangement[i], sec = section(bl.section), a = song.arrangement;
+  blockSel = i; secSel = bl.section; drawBlocks(); drawBlockEdit(); playLabel();
+  const redraw = () => { keep(); drawArrange(); playLabel(); };
+  showMenu(e, 'Block ' + (i + 1) + ': ' + (sec ? sec.name : '?') + (bl.label ? ', ' + bl.label : ''), [
+    { label: 'Play this block', run: () => play({ kind: 'block', index: i }) },
+    { label: 'Play the song from here', run: () => play({ kind: 'from', index: i }) },
+    { label: 'Compose section ' + (sec ? sec.name : ''), run: () => { chordSel = -1; setView('compose'); } },
+    null,
+    { label: 'Play it once more', key: '×' + ((+bl.repeat || 1) + 1), run: () => { bl.repeat = (+bl.repeat || 1) + 1; redraw(); } },
+    ...((+bl.repeat || 1) > 1 ? [{ label: 'Play it once less', key: '×' + ((+bl.repeat || 1) - 1), run: () => { bl.repeat = (+bl.repeat || 1) - 1; redraw(); } }] : []),
+    { label: 'Name it…', run: () => { const n = prompt('A name for block ' + (i + 1), bl.label || ''); if (n !== null) { bl.label = n.trim(); redraw(); } } },
+    null,
+    { label: 'Copy', run: () => { a.splice(i + 1, 0, JSON.parse(JSON.stringify(bl))); blockSel = i + 1; redraw(); } },
+    ...(i > 0 ? [{ label: 'Move to the start', run: () => { a.unshift(a.splice(i, 1)[0]); blockSel = 0; redraw(); } }] : []),
+    ...(i < a.length - 1 ? [{ label: 'Move to the end', run: () => { a.push(a.splice(i, 1)[0]); blockSel = a.length - 1; redraw(); } }] : []),
+    null,
+    { label: 'Remove this block', danger: true, run: () => { if (a.length > 1) { a.splice(i, 1); blockSel = Math.max(0, i - 1); redraw(); } else status('A song needs at least one block', true); } },
+  ]);
+}
+function sectionMenu(e, s) {
+  const used = song.arrangement.filter((b) => b.section === s.id).length;
+  showMenu(e, 'Section ' + s.name + ' · ' + bars(secBars(s)) + ', ' + bpbOf(s) + ' beats a bar', [
+    { label: 'Compose it', run: () => { secSel = s.id; chordSel = -1; setView('compose'); } },
+    { label: 'Play it', run: () => play({ kind: 'section', id: s.id }) },
+    { label: 'Add it to the end of the song', run: () => { song.arrangement.push({ section: s.id, repeat: 1 }); blockSel = song.arrangement.length - 1; keep(); drawArrange(); } },
+    null,
+    { label: 'Copy it', run: () => copySection(s) },
+    { label: 'Copy it with another time signature…', run: () => {
+      const n = parseInt(prompt('Beats a bar for the copy of ' + s.name + ' (2 to 7)', String(bpbOf(s) === 3 ? 4 : 3)), 10);
+      if (n >= 2 && n <= 7) { const c = copySection(s); c.beatsPerBar = n; c.name = s.name + ' in ' + n; keep(); drawAll(); status('Copied ' + s.name + ' as ' + c.name + ', ' + n + ' beats a bar'); }
+    } },
+    { label: 'Rename it…', run: () => renameSection(s) },
+    null,
+    { label: used ? 'Remove it (take it out of the song first)' : 'Remove it', danger: true, run: () => removeSection(s) },
+  ]);
+}
 
 // ---------------------------------------------------------------- start
 function drawAll() { drawHeader(); drawLens(); setView(view); }

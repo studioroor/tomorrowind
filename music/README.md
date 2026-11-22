@@ -17,6 +17,10 @@ tools/music/studio.py          # then open http://127.0.0.1:8765
   Without `--music` the trailers keep their own pad (`pad()` in
   `tools/music/synth.py`).
 - Space plays and stops. Changes made while it plays are heard a moment later.
+- ⌘S saves, ⌘Z / ⇧⌘Z undo and redo, ⌘K opens the command bar (type
+  "compose B", "add C", "play from block 3", "open song …"), ? lists the
+  keys. Right-click a block or a section for its options (play, repeat,
+  copy, move, copy with another time signature, rename, remove).
 
 ## A song: three views
 
