@@ -95,8 +95,6 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .panel .ph .peek { color: var(--parch-dim); font-size: 13px; }
 .panel .ph .tools { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .panel > .pb { padding: 2px 12px 12px; }
-.panel > .ph.octs { padding-top: 0; gap: 6px; flex-wrap: wrap; }
-.panel.closed > .ph.octs { display: none; }
 .panel.closed > .pb { display: none; }
 /* folded: a glimpse of what's inside instead of the summary */
 .viz { display: none; }
@@ -112,6 +110,9 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .tile { min-width: 92px; padding: 7px 11px 6px; background: var(--basalt); border: 1px solid var(--line); border-radius: 6px; cursor: pointer; text-align: left; display: flex; flex-direction: column; gap: 2px; }
 .tile .sym { font: 30px/1 var(--display); color: var(--gold); }
 .tile .sub { color: var(--parch-dim); font-size: 12px; }
+.tile { touch-action: none; }
+.tile.drag { opacity: .35; }
+.tile .rests { color: #c9a27a; font-style: italic; }
 .add { justify-content: center; align-items: center; color: var(--parch-dim); font-size: 26px; min-width: 56px; }
 .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .row > .label { width: 84px; color: var(--parch-dim); font-size: 13px; }
@@ -253,12 +254,11 @@ input[type=range] { accent-color: var(--gold); }
     </div>
     <div class="panel" data-panel="melody">
       <div class="ph"><button class="fold"><span class="chev">▾</span><h2>Melody</h2></button><span class="peek" id="peekMelody"></span><span class="viz vcanvas"><canvas id="vizMelody"></canvas></span>
-        <span class="tools"><span class="peek">Note length</span><span id="lens" class="row"></span><button class="btn small danger" id="clearMelody">Clear</button></span></div>
-      <div class="ph octs"><span class="peek" id="octLabel">The whole melody</span>
-        <button class="btn small" data-oct="12">Up an octave</button><button class="btn small" data-oct="-12">Down an octave</button>
-        <button class="btn small" data-oct="12" data-copy="1" title="Add the melody again an octave higher: in octaves">Copy up</button>
-        <button class="btn small" data-oct="-12" data-copy="1" title="Add the melody again an octave lower: in octaves">Copy down</button></div>
-      <div class="pb"><p class="hint">Click an empty spot for a note; double-click a note to take it away. Click notes to select them (Shift for more), or drag a box around them. Drag them to move, with Option to copy; drag a note's right edge to make it longer. Keys: Delete, arrows (Shift+↑↓: an octave), ⌘C ⌘V, ⌘D duplicate, ⌘A all. Gold rows are the notes of the chord playing there.</p>
+        <span class="tools"><span class="peek">Note length</span><span id="lens" class="row"></span>
+          <button class="btn small" id="melMenu" title="Octaves, copy, paste, delete: for the selected notes, or the whole melody (or right-click the roll)">Notes ▾</button>
+          <button class="btn small" id="melHelp" title="How to edit the melody" aria-pressed="false">?</button>
+          <button class="btn small danger" id="clearMelody">Clear</button></span></div>
+      <div class="pb"><p class="hint" id="melHint" hidden>Click an empty spot for a note; double-click a note to take it away. Click notes to select them (Shift for more), or drag a box around them. Drag them to move, with Option to copy; drag a note's right edge to make it longer. Right-click for octaves, copy and paste. Keys: Delete, arrows (Shift+↑↓: an octave), ⌘C ⌘V, ⌘D duplicate, ⌘A all. Gold rows are the notes of the chord playing there.</p>
         <div class="rollwrap" id="rollwrap"><canvas id="roll"></canvas></div></div>
     </div>
     <div class="panel" data-panel="drums">
@@ -453,7 +453,8 @@ function bindHeader() {
     status(r.error ? r.error : 'Exported ' + r.path, !!r.error);
   };
   $('#resetParts').onclick = () => { cur().parts = {}; keep(); drawParts(); peeks(); };
-  for (const b of document.querySelectorAll('[data-oct]')) b.onclick = () => shiftMelody(+b.dataset.oct, !!b.dataset.copy);
+  $('#melMenu').onclick = (e) => { const r = e.currentTarget.getBoundingClientRect(); melodyMenu({ preventDefault() {}, clientX: r.left, clientY: r.bottom + 4 }); };
+  $('#melHelp').onclick = () => { ui.melHelp = !ui.melHelp; keepUi(); melTools(); };
   $('#clearMelody').onclick = () => { cur().melody = []; keep(); drawRoll(); peeks(); };
   for (const b of document.querySelectorAll('[data-add]')) b.onclick = () => addTrack(b.dataset.add);
   for (const p of document.querySelectorAll('.panel')) {
@@ -565,9 +566,17 @@ document.addEventListener('pointermove', (e) => {
   }
   d.ghost.style.left = (e.clientX - d.dx) + 'px';
   d.ghost.style.top = (e.clientY - d.dy) + 'px';
+  const inside = (elm) => { const r = elm.getBoundingClientRect(); return e.clientX >= r.left - 20 && e.clientX <= r.right + 20 && e.clientY >= r.top - 20 && e.clientY <= r.bottom + 20; };
+  // a chord: among the section's chords (Option: a copy goes there)
+  if (d.what.chord !== undefined) {
+    const box = $('#chords'), tiles = [...box.querySelectorAll('.tile:not(.add)')];
+    d.target = inside(box) ? { where: 'chords', index: dropIndex(tiles, e.clientX, e.clientY) } : null;
+    showMarker(tiles, d.target ? d.target.index : -1, box);
+    d.ghost.style.opacity = e.altKey ? '1' : '';
+    return;
+  }
   // over the song's row of blocks, or over the cards?
   const strip = $('#blocks'), cards = $('#cards');
-  const inside = (elm) => { const r = elm.getBoundingClientRect(); return e.clientX >= r.left - 20 && e.clientX <= r.right + 20 && e.clientY >= r.top - 20 && e.clientY <= r.bottom + 20; };
   const blocks = [...strip.querySelectorAll('.block')], cardEls = [...cards.querySelectorAll('.card:not(.new)')];
   d.target = null;
   if (inside(strip)) { d.target = { where: 'song', index: dropIndex(blocks, e.clientX, e.clientY) }; showMarker(blocks, d.target.index, strip); }
@@ -575,7 +584,7 @@ document.addEventListener('pointermove', (e) => {
   else showMarker([], -1);
   strip.classList.toggle('over', d.target?.where === 'song');
 });
-document.addEventListener('pointerup', () => {
+document.addEventListener('pointerup', (e) => {
   const d = dragging;
   dragging = null;
   if (!d || !d.started) return;
@@ -585,6 +594,16 @@ document.addEventListener('pointerup', () => {
   showMarker([], -1); $('#blocks').classList.remove('over');
   const t = d.target;
   if (!t) return;
+  if (d.what.chord !== undefined && t.where === 'chords') {
+    const a = cur().chords, from = d.what.chord;
+    if (e.altKey) { a.splice(t.index, 0, JSON.parse(JSON.stringify(a[from]))); chordSel = t.index; }
+    else {
+      const to = t.index > from ? t.index - 1 : t.index;
+      if (to === from) return;
+      a.splice(to, 0, a.splice(from, 1)[0]); chordSel = to;
+    }
+    chordsChanged(); return;
+  }
   if (d.what.block !== undefined && t.where === 'song') {
     const a = song.arrangement, from = d.what.block;
     const [b] = a.splice(from, 1);
@@ -906,12 +925,31 @@ function drawCompose() {
   if (sel.size && ![...sel].every((n) => (cur().melody || []).includes(n))) sel = new Set();
   drawSecbar(); drawParts(); drawChords(); drawRoll(); drawDrums(); peeks(); melTools();
 }
+// who can sit out a chord: the tracks playing in this section, and the drums
+function chordPlayers(s) {
+  const list = song.tracks.filter((t) => !t.mute && partIn(s, t) !== 'rest').map((t) => [t.id, trackName(t)]);
+  if ((s.drums || []).length) list.push(['drums', 'Drums']);
+  return list;
+}
+function restsIn(c) { return c.rest || []; }
+function toggleRest(c, id) {
+  const r = new Set(restsIn(c));
+  r.has(id) ? r.delete(id) : r.add(id);
+  if (r.size) c.rest = [...r]; else delete c.rest;
+}
+function chordsChanged() { keep(); drawChords(); drawRoll(); drawDrums(); peeks(); }
 function drawChords() {
   const box = $('#chords'), s = cur(); box.innerHTML = '';
+  const names = Object.fromEntries(chordPlayers(s));
   s.chords.forEach((c, i) => {
     const t = el('button', 'tile' + (i === chordSel ? ' sel' : ''));
     t.append(el('span', 'sym', chordSym(c)), el('span', 'sub', bars(+c.bars || 1) + ', ' + (c.voicing || 'close') + ', oct ' + c.octave));
-    t.onclick = () => { chordSel = chordSel === i ? -1 : i; drawChords(); };
+    const out = restsIn(c).filter((id) => names[id]);
+    if (out.length) t.appendChild(el('span', 'sub rests', (out.length <= 2 ? out.map((id) => names[id]).join(', ') : out.length + ' tracks') + (out.length === 1 ? ' sits out' : ' sit out')));
+    t.title = 'Click to edit. Drag to move (Option: a copy). Right-click for more.';
+    t.onclick = () => { if (dragged()) return; chordSel = chordSel === i ? -1 : i; drawChords(); };
+    t.addEventListener('pointerdown', (e) => startDrag(e, t, { chord: i }));
+    t.oncontextmenu = (e) => chordMenu(e, i);
     box.appendChild(t);
   });
   const add = el('button', 'tile add', '+'); add.setAttribute('aria-label', 'Add a chord'); add.title = 'Add a chord';
@@ -933,6 +971,9 @@ function drawChordEdit() {
     (v) => (c.voicing || 'close') === v, set((v) => c.voicing = v));
   chips(ed, 'Octave', [1, 2, 3, 4, 5].map((o) => [o, String(o)]), (v) => +c.octave === v, set((v) => c.octave = v));
   chips(ed, 'Bars', [0.5, 1, 2, 3, 4].map((b) => [b, String(b)]), (v) => +(c.bars || 1) === v, set((v) => c.bars = v));
+  const who = chordPlayers(s);
+  if (who.length) chips(ed, 'Who plays', who.map(([id, n]) => [id, n, 'Click to have it sit out this chord, or play again']),
+    (v) => !restsIn(c).includes(v), set((v) => toggleRest(c, v))).title = 'Lit: plays on this chord. Dark: sits it out';
   chips(ed, '', [['left', 'Move left'], ['right', 'Move right'], ['copy', 'Copy'], ['remove', 'Remove'], ['done', 'Done']], () => false, set((v) => {
     const a = s.chords;
     if (v === 'left' && chordSel > 0) { [a[chordSel - 1], a[chordSel]] = [a[chordSel], a[chordSel - 1]]; chordSel--; }
@@ -1195,11 +1236,40 @@ function melodyKeys(e) {
   keep(); drawRoll(); peeks(); melTools();
   return true;
 }
-// the octave buttons: on the selected notes, or the whole melody
+// what the Notes menu works on: the selected notes, or the whole melody
+function melWhat() { const n = sel.size; return n ? (n === 1 ? 'The selected note' : 'The ' + n + ' selected notes') : 'The whole melody'; }
 function melTools() {
-  const n = sel.size;
-  $('#octLabel').textContent = n ? (n === 1 ? 'The selected note' : 'The ' + n + ' selected notes') : 'The whole melody';
+  $('#melHint').hidden = !ui.melHelp;
+  $('#melHelp').classList.toggle('on', !!ui.melHelp); $('#melHelp').setAttribute('aria-pressed', !!ui.melHelp);
 }
+function melodyMenu(e) {
+  const mel = cur().melody = cur().melody || [], after = () => { keep(); drawRoll(); peeks(); melTools(); };
+  const span = () => { const [b0, b1] = selectionSpan(); return [[...sel].map((n) => ({ beat: n.beat - b0, len: n.len, pitch: n.pitch })), b1]; };
+  showMenu(e, melWhat(), [
+    { label: 'Up an octave', key: '⇧↑', run: () => shiftMelody(12) },
+    { label: 'Down an octave', key: '⇧↓', run: () => shiftMelody(-12) },
+    { label: 'Copy it an octave up', run: () => shiftMelody(12, true) },
+    { label: 'Copy it an octave down', run: () => shiftMelody(-12, true) },
+    null,
+    ...(sel.size ? [
+      { label: 'Duplicate', key: '⌘D', run: () => { const [ns, b1] = span(); status('Duplicated ' + putNotes(ns, b1) + ' notes'); after(); } },
+      { label: 'Copy', key: '⌘C', run: () => { clip = span()[0]; status('Copied ' + clip.length + (clip.length === 1 ? ' note' : ' notes')); } },
+    ] : []),
+    ...(clip ? [{ label: 'Paste', key: '⌘V', run: () => { status('Pasted ' + putNotes(clip, sel.size ? selectionSpan()[1] : lastBeat) + ' notes'); after(); } }] : []),
+    { label: 'Select all', key: '⌘A', run: () => { sel = new Set(mel); after(); } },
+    ...(sel.size ? [null, { label: 'Delete', key: 'Delete', danger: true, run: () => { cur().melody = mel.filter((n) => !sel.has(n)); sel = new Set(); after(); } }] : []),
+  ]);
+}
+roll.addEventListener('contextmenu', (e) => {
+  const [x, y] = rollPos(e);
+  if (x < KEYS) return;
+  const hit = noteAt(x, y);
+  // on a note outside the selection: that note; on an empty spot, the selection stays
+  if (hit && !sel.has(hit.n)) sel = new Set([hit.n]);
+  lastBeat = floorSnap((x - KEYS) / pxBeat);
+  drawRoll();
+  melodyMenu(e);
+});
 drumsCv.addEventListener('click', (e) => {
   const r = drumsCv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
   if (x < KEYS) return;
@@ -1461,7 +1531,7 @@ const KEYS_HELP = [
   ['Play or stop', 'Space'], ['Save', '⌘S'], ['Commands', '⌘K'], ['Undo / redo', '⌘Z / ⇧⌘Z'], ['Arrange / Compose / Band', '1 / 2 / 3'],
   ['Melody: select all', '⌘A'], ['Melody: copy, paste, duplicate', '⌘C ⌘V ⌘D'], ['Melody: move a step / a semitone', '← → / ↑ ↓'],
   ['Melody: an octave', '⇧↑ ⇧↓'], ['Melody: remove the selected notes', 'Delete'], ['Melody: copy while dragging', 'Option'],
-  ['Right-click a block or a section', 'its options'], ['These keys', '?'],
+  ['Right-click a block, a section, a chord or the melody', 'its options'], ['Drag a chord (Option: a copy)', 'drag'], ['These keys', '?'],
 ];
 let cmdItems = [], cmdOn = 0;
 function openCommands(mode) {
@@ -1549,11 +1619,35 @@ function blockMenu(e, i) {
     ...((+bl.repeat || 1) > 1 ? [{ label: 'Play it once less', key: '×' + ((+bl.repeat || 1) - 1), run: () => { bl.repeat = (+bl.repeat || 1) - 1; redraw(); } }] : []),
     { label: 'Name it…', run: () => { const n = prompt('A name for block ' + (i + 1), bl.label || ''); if (n !== null) { bl.label = n.trim(); redraw(); } } },
     null,
+    // who plays in this block (the same as the tick boxes under the song)
+    ...whoItems([...song.tracks.map((t) => [t.id, trackName(t)]), ['drums', 'Drums']], (id) => (bl.mix?.[id]?.on ?? true),
+      (id) => { bl.mix = bl.mix || {}; bl.mix[id] = { ...(bl.mix[id] || {}), on: !(bl.mix[id]?.on ?? true) }; redraw(); }),
+    null,
     { label: 'Copy', run: () => { a.splice(i + 1, 0, JSON.parse(JSON.stringify(bl))); blockSel = i + 1; redraw(); } },
     ...(i > 0 ? [{ label: 'Move to the start', run: () => { a.unshift(a.splice(i, 1)[0]); blockSel = 0; redraw(); } }] : []),
     ...(i < a.length - 1 ? [{ label: 'Move to the end', run: () => { a.push(a.splice(i, 1)[0]); blockSel = a.length - 1; redraw(); } }] : []),
     null,
     { label: 'Remove this block', danger: true, run: () => { if (a.length > 1) { a.splice(i, 1); blockSel = Math.max(0, i - 1); redraw(); } else status('A song needs at least one block', true); } },
+  ]);
+}
+// on/off items for who plays: ✓ when it plays
+function whoItems(list, plays, toggle) {
+  return list.map(([id, name]) => ({ label: name, key: plays(id) ? '✓ plays' : 'sits out', run: () => toggle(id) }));
+}
+function chordMenu(e, i) {
+  const s = cur(), a = s.chords, c = a[i];
+  chordSel = i; drawChords();
+  const who = chordPlayers(s);
+  showMenu(e, 'Chord ' + (i + 1) + ': ' + chordSym(c) + ', ' + bars(+c.bars || 1), [
+    { label: 'Copy it (after this one)', key: '⌥ drag', run: () => { a.splice(i + 1, 0, JSON.parse(JSON.stringify(c))); chordSel = i + 1; chordsChanged(); } },
+    { label: 'Twice as long', key: bars((+c.bars || 1) * 2), run: () => { c.bars = (+c.bars || 1) * 2; chordsChanged(); } },
+    ...((+c.bars || 1) > 0.5 ? [{ label: 'Half as long', key: bars((+c.bars || 1) / 2), run: () => { c.bars = (+c.bars || 1) / 2; chordsChanged(); } }] : []),
+    ...(i > 0 ? [{ label: 'Move to the start', run: () => { a.unshift(a.splice(i, 1)[0]); chordSel = 0; chordsChanged(); } }] : []),
+    ...(i < a.length - 1 ? [{ label: 'Move to the end', run: () => { a.push(a.splice(i, 1)[0]); chordSel = a.length - 1; chordsChanged(); } }] : []),
+    ...(who.length ? [null, ...whoItems(who, (id) => !restsIn(c).includes(id), (id) => { toggleRest(c, id); chordsChanged(); })] : []),
+    ...(restsIn(c).length ? [{ label: 'Everyone plays', run: () => { delete c.rest; chordsChanged(); } }] : []),
+    null,
+    { label: 'Remove this chord', danger: true, run: () => { if (a.length > 1) { a.splice(i, 1); chordSel = -1; chordsChanged(); } else status('A section needs at least one chord', true); } },
   ]);
 }
 function sectionMenu(e, s) {

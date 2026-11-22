@@ -183,8 +183,10 @@ def pluck_events(out, events, p):
 #                       "fadeIn": 0, "fadeOut": 0, "slowTo": 1} ],     fades in bars; slowTo: the tempo
 #     "tracks": [ {"id": "t1", "type": .., ..} ]                        at the block's end, as a share
 #   }
-# A chord: {"root": "G", "octave": 3, "quality": "", "voicing": "close", "bars": 1, "bass": "B"}
-# (bass: a note under the chord other than its root: G/B). Songs from before
+# A chord: {"root": "G", "octave": 3, "quality": "", "voicing": "close", "bars": 1, "bass": "B",
+#           "rest": ["t2", "drums"]}
+# (bass: a note under the chord other than its root: G/B; rest: tracks, or the
+# drums, that stay silent while this chord plays). Songs from before
 # sections (chords and melody at the top) open as section A, played `repeat` times.
 
 DRUMS = {
@@ -381,6 +383,15 @@ def part_beats(track, chords, melody):
     return out
 
 
+def resting(chords, key, beat):
+    """Does `key` (a track id, or 'drums') rest at this beat: the chord
+    playing then says so."""
+    for b, ln, c in chords:
+        if b <= beat + 1e-6 < b + ln:
+            return key in (c.get('rest') or ())
+    return False
+
+
 def swung(beat, swing):
     """Off-beats (halfway through a beat) come a little late: up to a triplet feel."""
     if swing and abs((beat % 1) - 0.5) < 1e-6:
@@ -447,7 +458,8 @@ def render(song, loop=False, soundfont=SOUNDFONT, info=None):
             # the same notes again, straight after: held on, not struck again
             # (bass and chords; plucks always strike, there's nothing to hold)
             holds = part in ('bass', 'chords') and tr['type'] != 'pluck' and tr.get('hold', True)
-            played = part_beats(tr, chords, melody)
+            # less what falls on a chord this track sits out
+            played = [p for p in part_beats(tr, chords, melody) if not resting(chords, tr['id'], p[0])]
             if tr['type'] != 'pluck' and legato_for(tr, sec, bl):
                 played = legato(played)
             for s0, ln, notes in played:
@@ -499,7 +511,7 @@ def render(song, loop=False, soundfont=SOUNDFONT, info=None):
             dgain *= float(song.get('drumVolume', 1.0))
             for h in sec.get('drums', []):
                 hb = float(h.get('beat', 0))
-                if hb >= beats:
+                if hb >= beats or resting(chords, 'drums', hb):
                     continue
                 kind = DRUMS.get(h.get('kind', 'low'), DRUMS['low'])
                 t = when(start + hb)

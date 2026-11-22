@@ -19,8 +19,8 @@ tools/music/studio.py          # then open http://127.0.0.1:8765
 - Space plays and stops. Changes made while it plays are heard a moment later.
 - ⌘S saves, ⌘Z / ⇧⌘Z undo and redo, ⌘K opens the command bar (type
   "compose B", "add C", "play from block 3", "open song …"), ? lists the
-  keys. Right-click a block or a section for its options (play, repeat,
-  copy, move, copy with another time signature, rename, remove).
+  keys. Right-click a block, a section, a chord or the melody for its
+  options (play, repeat, copy, move, who plays, octaves, rename, remove).
 
 ## A song: three views
 
@@ -41,13 +41,16 @@ Switch at the top (or press 1, 2, 3):
 - **Compose**: one section at a time, its chords, melody and drums in
   panels that fold away (folded, they still show the line-up, the chords,
   the melody's contour and the drum patterns). Play plays this section. A
-  section can have its own **time signature** (beats a bar).
-- **The melody**: click an empty spot for a note, double-click a note to
+  section can have its own **time signature** (beats a bar). Drag the
+  chords to change their order (Option: a copy); a chord can let a track or
+  the drums **sit out** (Who plays, in the chord, or right-click it).
+- **The melody** (? shows how): click an empty spot for a note, double-click a note to
   take it away. Click notes to select them (Shift for more) or drag a box
   around them; drag to move, with Option to copy; drag a note's right edge
   to make it longer. Keys: Delete, arrows (Shift+↑↓ an octave), ⌘C ⌘V,
   ⌘D duplicate, ⌘A all. Note lengths from a quarter beat, **dotted** too;
-  the octave buttons move or copy the selection (or the whole melody). **Who plays what** gives a
+  Notes ▾ (or a right-click) moves or copies the selection, or the whole
+  melody, an octave up or down. **Who plays what** gives a
   track another part in this section (the harp on the melody in A, on
   arpeggios in B, the strings taking the melody) or lets it rest; a track
   you don't change plays its usual part from the Band. The ⌒ on a track is
