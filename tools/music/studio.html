@@ -140,6 +140,7 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .ttag.out .tpick > span:first-child { text-decoration: line-through; }
 .tvol { display: inline-flex; align-items: center; gap: 4px; }
 .tvol input { width: 74px; }
+.tvol.moved output { color: var(--gold); }
 .tvol output { font-size: 11px; color: var(--parch-dim); min-width: 32px; font-variant-numeric: tabular-nums; }
 .slur { background: none; border: 1px solid transparent; border-radius: 4px; padding: 0 5px; font-size: 17px; line-height: 1.1; color: var(--parch-dim); cursor: pointer; opacity: .55; }
 .slur.on { color: var(--gold); opacity: 1; }
@@ -245,7 +246,7 @@ input[type=range] { accent-color: var(--gold); }
     <div class="panel" data-panel="parts">
       <div class="ph"><button class="fold"><span class="chev">▾</span><h2>Who plays what</h2></button><span class="peek" id="peekParts"></span><span class="viz vparts" id="vizParts"></span>
         <span class="tools"><button class="btn small" id="resetParts">Back to the band's parts</button></span></div>
-      <div class="pb"><p class="hint">Drag a track to the part it plays in this section, or click it and then click the row. Gold: not its usual part.</p>
+      <div class="pb"><p class="hint">Drag a track to the part it plays in this section, or click it and then click the row. Gold: not its usual part. The sliders: how loud it is in this section.</p>
         <div class="lanes" id="parts"></div></div>
     </div>
     <div class="panel" data-panel="chords">
@@ -392,6 +393,7 @@ async function openSong(name) {
   const r = await fetch('/api/song/' + encodeURIComponent(name));
   if (!r.ok) return status('There is no song called ' + name, true);
   useSong(await r.json());
+  $('#songList').value = name;
   status('Opened ' + name);
 }
 function useSong(s) {
@@ -474,6 +476,8 @@ function blockSummary(bl) {
   // who plays, by name while that's short
   parts.push(on.length === song.tracks.length ? 'everyone' : on.length === 0 ? 'nobody' : on.length === 1 ? trackName(on[0]) + ' only'
     : on.length <= 3 ? on.map(trackName).join(' + ') : on.length + ' of ' + song.tracks.length + ' tracks');
+  const own = +bl.bpm || +(section(bl.section) || {}).bpm;
+  if (own && own !== +song.bpm) parts.push(own + ' bpm');
   if (+bl.fadeIn) parts.push('fades in');
   if (+bl.fadeOut) parts.push('fades out');
   if ((+bl.slowTo || 1) < 1) parts.push(+bl.slowOver ? 'slows down over ' + bars(+bl.slowOver) : 'slows down');
@@ -628,6 +632,21 @@ function chips(parent, label, items, isOn, pick) {
   parent.appendChild(r);
   return r;
 }
+// a tempo of its own (empty: as the section, or the song)
+function tempoRow(parent, label, value, fallback, set) {
+  const r = el('div', 'row'); r.appendChild(el('span', 'label', label));
+  const inp = el('input'); inp.type = 'number'; inp.min = 20; inp.max = 240; inp.step = 1;
+  inp.value = value || ''; inp.placeholder = String(fallback);
+  inp.setAttribute('aria-label', label);
+  const say = el('span', 'hint', ''); say.style.margin = '0';
+  const note = () => { say.textContent = inp.value ? 'bpm' : 'bpm, ' + fallbackText; };
+  let fallbackText = '';
+  inp.onchange = () => { const v = Math.round(+inp.value); set(v >= 20 && v <= 240 ? v : 0); };
+  r.append(inp, say);
+  if (value) r.appendChild(button('Back to ' + fallback + ' bpm', () => set(0), 'btn small'));
+  parent.appendChild(r);
+  return { row: r, say: (t) => { fallbackText = t; note(); } };
+}
 function drawBlockEdit() {
   const ed = $('#blockEdit'), bl = song.arrangement[blockSel];
   ed.innerHTML = '';
@@ -650,12 +669,15 @@ function drawBlockEdit() {
     (v) => { bl.slowTo = v; redraw(); }).title = 'The tempo eases down to this by the end of the block';
   if ((+bl.slowTo || 1) < 1) chips(ed, 'Slowing over', [[0, 'the whole block'], [1, 'last bar'], [2, '2'], [4, '4'], [8, '8']], (v) => (+bl.slowOver || 0) === v,
     (v) => { if (v) bl.slowOver = v; else delete bl.slowOver; redraw(); }).title = 'How many bars at the end of the block the slow-down takes';
+  const secBpm = +(sec && sec.bpm) || 0;
+  tempoRow(ed, 'Tempo', +bl.bpm || 0, secBpm || song.bpm, (v) => { if (v) bl.bpm = v; else delete bl.bpm; redraw(); })
+    .say(secBpm ? 'as section ' + sec.name : 'as the song');
   const wr = el('div', 'row'); wr.appendChild(el('span', 'label', 'Who plays'));
   wr.append(button('Everyone', () => { bl.mix = {}; redraw(); }, 'chip'),
     button('Nobody', () => { bl.mix = Object.fromEntries([...song.tracks.map((t) => [t.id, { on: false }]), ['drums', { on: false }]]); redraw(); }, 'chip'));
   ed.appendChild(wr);
   if (sec) {
-    const note = el('p', 'hint', 'Tick a track to have it play in this block, and set how loud. Moving a track to another row changes its part in section ' + sec.name + ', in every block that plays it.');
+    const note = el('p', 'hint', 'Tick a track to have it play in this block, and set how loud here (on top of how loud it is in the section, in Compose). Moving a track to another row changes its part in section ' + sec.name + ', in every block that plays it.');
     note.style.margin = '0';
     ed.appendChild(note);
     const lanes = el('div', 'lanes');
@@ -692,7 +714,7 @@ function drawCards() {
     const c = el('div', 'card');
     const used = song.arrangement.filter((b) => b.section === s.id).length;
     const chordsTxt = s.chords.slice(0, 6).map(chordSym).join(' ') + (s.chords.length > 6 ? ' …' : '');
-    c.append(el('span', 'sym', s.name), el('span', 'sub', bars(secBars(s)) + ', ' + (s.melody?.length || 0) + ' melody notes, ' + (used ? 'in the song ' + used + '×' : 'not in the song yet')), el('span', 'sub', chordsTxt));
+    c.append(el('span', 'sym', s.name), el('span', 'sub', bars(secBars(s)) + (+s.bpm ? ' at ' + s.bpm + ' bpm' : '') + ', ' + (s.melody?.length || 0) + ' melody notes, ' + (used ? 'in the song ' + used + '×' : 'not in the song yet')), el('span', 'sub', chordsTxt));
     const acts = el('div', 'acts');
     acts.append(
       button('Add to song', () => { song.arrangement.push({ section: s.id, repeat: 1 }); blockSel = song.arrangement.length - 1; keep(); drawArrange(); }),
@@ -762,6 +784,9 @@ function drawSecbar() {
   const ts = el('div', 'row tsig');
   chips(ts, 'Beats a bar', [[0, 'as the song (' + bpb() + ')'], ...[2, 3, 4, 5, 6, 7].map((n) => [n, String(n)])],
     (v) => (+s.beatsPerBar || 0) === v, (v) => { if (v) s.beatsPerBar = v; else delete s.beatsPerBar; keep(); drawCompose(); drawCards(); });
+  const tp = tempoRow(ts, 'Tempo', +s.bpm || 0, song.bpm, (v) => { if (v) s.bpm = v; else delete s.bpm; keep(); drawCompose(); drawCards(); });
+  tp.row.style.marginLeft = '18px'; tp.row.querySelector('.label').style.width = 'auto';
+  tp.say('as the song');
   box.appendChild(ts);
 }
 function peeks() {
@@ -858,6 +883,20 @@ function legatoButton(tag, t, sec, bl, redraw) {
   };
   tag.appendChild(b);
 }
+// a loudness slider (0 to 150%); double-click: back to 100%
+function volSlider(value, label, set) {
+  const vr = el('span', 'tvol' + (Math.abs(value - 1) > 1e-6 ? ' moved' : ''));
+  const sl = el('input'); sl.type = 'range'; sl.min = 0; sl.max = 1.5; sl.step = 0.05; sl.value = value; sl.setAttribute('aria-label', label);
+  sl.title = label + '. Double-click: back to 100%';
+  const out = el('output', '', Math.round(value * 100) + '%');
+  sl.onclick = (e) => e.stopPropagation();
+  sl.onpointerdown = (e) => e.stopPropagation();
+  sl.oninput = () => { out.textContent = Math.round(sl.value * 100) + '%'; vr.classList.toggle('moved', Math.abs(sl.value - 1) > 1e-6); };
+  sl.onchange = () => set(+sl.value);
+  sl.ondblclick = () => { sl.value = 1; sl.oninput(); set(1); };
+  vr.append(sl, out);
+  return vr;
+}
 function blockControls(tag, bl, id, name, redraw) {
   bl.mix = bl.mix || {};
   const m = bl.mix[id] || {}, on = m.on ?? true, vol = m.volume ?? 1;
@@ -865,16 +904,23 @@ function blockControls(tag, bl, id, name, redraw) {
   cb.setAttribute('aria-label', name + ' plays in this block');
   cb.onclick = (e) => e.stopPropagation();
   cb.onchange = () => { bl.mix[id] = { ...(bl.mix[id] || {}), on: cb.checked }; keep(); redraw(); };
-  const vr = el('span', 'tvol');
-  const sl = el('input'); sl.type = 'range'; sl.min = 0; sl.max = 1.5; sl.step = 0.05; sl.value = vol; sl.setAttribute('aria-label', name + ' volume in this block');
-  const out = el('output', '', Math.round(vol * 100) + '%');
-  sl.onclick = (e) => e.stopPropagation();
-  sl.oninput = () => { out.textContent = Math.round(sl.value * 100) + '%'; };
-  sl.onchange = () => { bl.mix[id] = { ...(bl.mix[id] || {}), volume: +sl.value }; keep(); };
-  vr.append(sl, out);
   tag.prepend(cb);
-  tag.appendChild(vr);
+  tag.appendChild(volSlider(vol, name + ' volume in this block', (v) => {
+    const x = { ...(bl.mix[id] || {}), volume: v };
+    if (v === 1) delete x.volume;
+    bl.mix[id] = x; keep();
+  }));
   if (!on) tag.classList.add('out');
+}
+// how loud a track (or the drums) is in a section, in every block that plays it
+function sectionVolume(tag, sec, id, name) {
+  const v = (sec.volume || {})[id] ?? 1;
+  tag.appendChild(volSlider(v, name + ' volume in section ' + sec.name, (x) => {
+    sec.volume = sec.volume || {};
+    if (x === 1) delete sec.volume[id]; else sec.volume[id] = x;
+    if (!Object.keys(sec.volume).length) delete sec.volume;
+    keep(); drawCards();
+  }));
 }
 function drawLanes(box, sec, bl, redraw) {
   box.innerHTML = '';
@@ -895,6 +941,7 @@ function drawLanes(box, sec, bl, redraw) {
       tag.appendChild(name);
       legatoButton(tag, t, sec, bl, redraw);
       if (bl) blockControls(tag, bl, t.id, trackName(t), redraw);
+      else if (part !== 'rest') sectionVolume(tag, sec, t.id, trackName(t));
       tag.draggable = true;
       tag.ondragstart = (e) => { dragTrack = t.id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', t.id); };
       tag.ondragend = () => { dragTrack = null; box.querySelectorAll('.over').forEach((x) => x.classList.remove('over')); };
@@ -907,8 +954,8 @@ function drawLanes(box, sec, bl, redraw) {
     lane.onclick = () => { if (pickedTrack) moveTrack(sec, pickedTrack, part, redraw); };
     box.appendChild(lane);
   }
-  if (bl) {
-    // the drums: not a part, but in or out of the block all the same
+  {
+    // the drums: not a part, but in or out of the block (and how loud) all the same
     const lane = el('div', 'lane drums');
     const tags = el('div', 'tags');
     const tag = el('div', 'ttag drums');
@@ -916,7 +963,7 @@ function drawLanes(box, sec, bl, redraw) {
     const hits = (sec.drums || []).length;
     n.appendChild(el('small', '', hits ? hits + ' hits in ' + sec.name : 'none in ' + sec.name));
     tag.appendChild(n);
-    blockControls(tag, bl, 'drums', 'Drums', redraw);
+    if (bl) blockControls(tag, bl, 'drums', 'Drums', redraw); else sectionVolume(tag, sec, 'drums', 'Drums');
     tags.appendChild(tag);
     lane.append(el('span', 'lname', 'Drums'), tags);
     box.appendChild(lane);

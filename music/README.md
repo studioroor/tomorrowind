@@ -30,7 +30,9 @@ Switch at the top (or press 1, 2, 3):
   plays a section a number of times with its own line-up: switch tracks
   (and the drums) on or off and set how loud they are, to build up or thin
   out. A block can fade in, fade out, or slow down towards its end (over
-  the whole block, or its last bars). Drag
+  the whole block, or its last bars). A block can have its own
+  tempo, and each track its own loudness in the block (on top of the
+  section's). Drag
   blocks to reorder them, drag a section in (from the row under the song,
   or a card) to add it; drag the cards to put the sections in order. With a
   block selected, "From block N" plays the song from there, and in Compose
@@ -42,7 +44,9 @@ Switch at the top (or press 1, 2, 3):
 - **Compose**: one section at a time, its chords, melody and drums in
   panels that fold away (folded, they still show the line-up, the chords,
   the melody's contour and the drum patterns). Play plays this section. A
-  section can have its own **time signature** (beats a bar). Drag the
+  section can have its own **time signature** (beats a bar) and **tempo**;
+  the sliders in Who plays what set how loud each track (and the drums) is
+  in this section. Double-click a slider: back to 100%. Drag the
   chords to change their order (Option: a copy); a chord can let a track or
   the drums **sit out** (Who plays, in the chord, or right-click it).
 - **The melody** (? shows how): click an empty spot for a note, double-click a note to

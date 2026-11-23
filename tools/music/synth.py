@@ -172,19 +172,22 @@ def pluck_events(out, events, p):
 #     "feel": {"rubato": 0..1, "human": 0..1, "swing": 0..1},
 #     "sections": [ {"id": "A", "name": "A", "chords": [..], "melody": [..], "drums": [{"beat": 0, "kind": "low"}, ..],
 #                    "parts": {"<track id>": "melody" | "chords" | "bass" | "arp" | "rest"}} ],
-#                    "beatsPerBar": 3, "legato": {"<track id>": true}} ],
+#                    "beatsPerBar": 3, "legato": {"<track id>": true},
+#                    "volume": {"<track id>" | "drums": 0..1.5}, "bpm": 72} ],
 #                    (parts: what a track plays in this section, if not what the band says;
-#                    beatsPerBar: its own time signature; legato: per track, over the band's)
+#                    beatsPerBar: its own time signature; legato: per track, over the band's;
+#                    volume: per track, times the band's and the block's; bpm: its own tempo)
 # A block's mix can also say legato for a track ({"on":, "volume":, "legato":}),
 # over the section and the band. A track's "hold" (default true): its bass or chords hold on when the next
 # chord gives the same notes, rather than striking them again.
 #     "arrangement": [ {"section": "A", "repeat": 1, "label": "harp only",
 #                       "mix": {"<track id>": {"on": true, "volume": 1}, "drums": {..}},
-#                       "fadeIn": 0, "fadeOut": 0, "slowTo": 1, "slowOver": 0} ],
+#                       "fadeIn": 0, "fadeOut": 0, "slowTo": 1, "slowOver": 0, "bpm": 72} ],
 #     "tracks": [ {"id": "t1", "type": .., ..} ]
 #   }
 # (fades in bars; slowTo: the tempo at the block's end, as a share, reached
-# over its last slowOver bars, or the whole block when 0)
+# over its last slowOver bars, or the whole block when 0; bpm: the block's own
+# tempo, over its section's and the song's)
 # A chord: {"root": "G", "octave": 3, "quality": "", "voicing": "close", "bars": 1, "bass": "B",
 #           "rest": ["t2", "drums"]}
 # (bass: a note under the chord other than its root: G/B; rest: tracks, or the
@@ -319,10 +322,19 @@ class Clock:
     STEP = 1 / 32
 
     def __init__(self, song, blocks, passes, total, rng):
-        bpm = float(song.get('bpm', 60))
+        bpm = np.full(int(math.ceil(total / self.STEP)) + 2, float(song.get('bpm', 60)))
         rubato = float(song['feel'].get('rubato', 0))
-        n = int(math.ceil(total / self.STEP)) + 2
+        n = len(bpm)
         b = np.arange(n) * self.STEP
+        # a tempo of its own: the block's, else its section's, else the song's
+        secs = {s['id']: s for s in song['sections']}
+        for x in blocks:
+            bl = song['arrangement'][x['index']]
+            own = float(bl.get('bpm') or secs[x['section']].get('bpm') or 0)
+            if own > 0:
+                bpm[(b >= x['start']) & (b < x['start'] + x['beats'])] = own
+                if x is blocks[-1]:
+                    bpm[b >= x['start'] + x['beats']] = own
         factor = np.ones(n)
         if rubato > 0:
             ph = rng.uniform(0, 2 * math.pi, 3)
@@ -352,7 +364,7 @@ class Clock:
         sec_per_step = 60.0 / (bpm * factor) * self.STEP
         self.beats = b
         self.times = np.concatenate([[0.0], np.cumsum(sec_per_step)[:-1]])
-        self.last_spb = 60.0 / (bpm * factor[-1])
+        self.last_spb = 60.0 / (bpm[-1] * factor[-1])
 
     def t(self, beat):
         if beat >= self.beats[-1]:
@@ -462,7 +474,7 @@ def render(song, loop=False, soundfont=SOUNDFONT, info=None):
             on, gain = mixed(bl, tr['id'])
             if not on or gain <= 0:
                 continue
-            gain *= float(tr.get('volume', 1.0))
+            gain *= float(tr.get('volume', 1.0)) * float((sec.get('volume') or {}).get(tr['id'], 1.0))
             # the same notes again, straight after: held on, not struck again
             # (bass and chords; plucks always strike, there's nothing to hold)
             holds = part in ('bass', 'chords') and tr['type'] != 'pluck' and tr.get('hold', True)
@@ -516,7 +528,7 @@ def render(song, loop=False, soundfont=SOUNDFONT, info=None):
         # the drums
         on, dgain = mixed(bl, 'drums')
         if on and dgain > 0:
-            dgain *= float(song.get('drumVolume', 1.0))
+            dgain *= float(song.get('drumVolume', 1.0)) * float((sec.get('volume') or {}).get('drums', 1.0))
             for h in sec.get('drums', []):
                 hb = float(h.get('beat', 0))
                 if hb >= beats or resting(chords, 'drums', hb):
