@@ -148,6 +148,9 @@ body.dragging, body.dragging * { cursor: grabbing !important; user-select: none;
 .slur:not(.inherited) { border-color: var(--gold); }
 .ttag.drums { border-left-color: var(--parch-dim); cursor: default; }
 .lane.drums { cursor: default; border-top: 1px solid var(--line); border-radius: 0; padding-top: 8px; }
+.drumvols { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.drumvols .ttag, .ttag.kit { border-left-color: var(--parch-dim); cursor: default; padding: 3px 8px; }
+.drumcard .tbody { display: grid; }
 .rollwrap { overflow: auto; border: 1px solid var(--line); border-radius: 6px; background: #231f1c; }
 #rollwrap { max-height: 340px; }
 canvas { display: block; cursor: crosshair; }
@@ -265,7 +268,8 @@ input[type=range] { accent-color: var(--gold); }
     <div class="panel" data-panel="drums">
       <div class="ph"><button class="fold"><span class="chev">▾</span><h2>Drums</h2></button><span class="peek" id="peekDrums"></span><span class="viz vcanvas"><canvas id="vizDrums"></canvas></span>
         <span class="tools"><select id="addDrum" aria-label="Add a drum"></select><button class="btn small" id="allDrums">Show all drums</button></span></div>
-      <div class="pb"><p class="hint">Click a square for a hit on that half beat. Timpani play the root of the chord.</p>
+      <div class="pb"><p class="hint">Click a square for a hit on that half beat. Timpani play the root of the chord. The sliders: how loud each drum is in this section.</p>
+        <div class="tags drumvols" id="drumVols"></div>
         <div class="rollwrap"><canvas id="drums"></canvas></div></div>
     </div>
   </div>
@@ -965,6 +969,15 @@ function drawLanes(box, sec, bl, redraw) {
     tag.appendChild(n);
     if (bl) blockControls(tag, bl, 'drums', 'Drums', redraw); else sectionVolume(tag, sec, 'drums', 'Drums');
     tags.appendChild(tag);
+    // in a block: each drum the section uses, in or out and how loud
+    if (bl && (bl.mix.drums?.on ?? true)) {
+      const used = new Set((sec.drums || []).map((h) => h.kind || 'low'));
+      for (const [k, name] of setup.drums.filter(([k]) => used.has(k))) {
+        const kt = el('div', 'ttag kit'); kt.appendChild(el('span', 'tpick', name.replace(' on the root', '')));
+        blockControls(kt, bl, 'drum:' + k, name, redraw);
+        tags.appendChild(kt);
+      }
+    }
     lane.append(el('span', 'lname', 'Drums'), tags);
     box.appendChild(lane);
   }
@@ -1118,6 +1131,12 @@ function drawDrums() {
   for (const [k, n] of setup.drums) if (!rows.find(([r]) => r === k)) sel.add(new Option(n, k));
   sel.hidden = ui.allDrums;
   if (ui.closed.drums) return;
+  const vols = $('#drumVols'); vols.innerHTML = '';
+  for (const [k, n] of rows) {
+    const tag = el('div', 'ttag'); tag.appendChild(el('span', '', n.replace(' on the root', '')));
+    sectionVolume(tag, cur(), 'drum:' + k, n);
+    vols.appendChild(tag);
+  }
   const beats = geometry();
   const W = KEYS + beats * pxBeat, H = Math.max(1, rows.length) * DROW;
   const g = sizeCanvas(drumsCv, W, H);
@@ -1440,6 +1459,37 @@ function drawTracks(openIndex) {
     card.appendChild(body);
     box.appendChild(card);
   });
+  drawDrumCard(box);
+}
+// the drums in the band: all of them, and each drum, in the whole song
+function drawDrumCard(box) {
+  const used = new Set(song.sections.flatMap((s) => (s.drums || []).map((h) => h.kind || 'low')));
+  const card = el('div', 'track drumcard');
+  card.style.borderLeftColor = 'var(--parch-dim)';
+  const head = el('div', 'thead');
+  head.append(el('span', 'tname', 'Drums'), el('span', 'hint', used.size ? 'How loud, in the whole song. A section or a block can say more or less.' : 'No drums in the song yet: add them in Compose.'));
+  head.lastChild.style.margin = '0';
+  const all = el('div', 'ttag kit'); all.appendChild(el('span', '', 'All the drums'));
+  all.appendChild(volSlider(+song.drumVolume || (song.drumVolume === 0 ? 0 : 1), 'All the drums', (v) => { if (v === 1) delete song.drumVolume; else song.drumVolume = v; keep(); }));
+  head.appendChild(all);
+  card.appendChild(head);
+  if (used.size) {
+    const body = el('div', 'tbody tags');
+    body.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;padding-top:10px';
+    for (const [k, name] of setup.drums.filter(([k]) => used.has(k))) {
+      const tag = el('div', 'ttag kit'); tag.appendChild(el('span', '', name.replace(' on the root', '')));
+      const vols = song.drumVolumes || {};
+      tag.appendChild(volSlider(vols[k] ?? 1, name + ' in the whole song', (v) => {
+        song.drumVolumes = song.drumVolumes || {};
+        if (v === 1) delete song.drumVolumes[k]; else song.drumVolumes[k] = v;
+        if (!Object.keys(song.drumVolumes).length) delete song.drumVolumes;
+        keep();
+      }));
+      body.appendChild(tag);
+    }
+    card.appendChild(body);
+  }
+  box.appendChild(card);
 }
 
 // ---------------------------------------------------------------- playing

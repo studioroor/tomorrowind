@@ -31,8 +31,8 @@ Switch at the top (or press 1, 2, 3):
   (and the drums) on or off and set how loud they are, to build up or thin
   out. A block can fade in, fade out, or slow down towards its end (over
   the whole block, or its last bars). A block can have its own
-  tempo, and each track its own loudness in the block (on top of the
-  section's). Drag
+  tempo, and each track (and each drum) its own loudness in the block, on
+  top of the section's. Drag
   blocks to reorder them, drag a section in (from the row under the song,
   or a card) to add it; drag the cards to put the sections in order. With a
   block selected, "From block N" plays the song from there, and in Compose
@@ -46,7 +46,10 @@ Switch at the top (or press 1, 2, 3):
   the melody's contour and the drum patterns). Play plays this section. A
   section can have its own **time signature** (beats a bar) and **tempo**;
   the sliders in Who plays what set how loud each track (and the drums) is
-  in this section. Double-click a slider: back to 100%. Drag the
+  in this section, and the drums panel has one for each drum. Double-click
+  a slider: back to 100%. Louder is also played harder, on every
+  instrument: the orchestra plays harder, the pad swells (more shimmer and
+  overtones), the pluck rings brighter, the low drum thumps. Drag the
   chords to change their order (Option: a copy); a chord can let a track or
   the drums **sit out** (Who plays, in the chord, or right-click it).
 - **The melody** (? shows how): click an empty spot for a note, double-click a note to
@@ -69,7 +72,8 @@ Switch at the top (or press 1, 2, 3):
   same notes, chords and bass hold them on rather than striking them again
   (switch a track to "play again" for a pulse): a section of D chords gets
   one long D in the bass, and a pedal note under changing chords is the
-  chords' bass note (C/D).
+  chords' bass note (C/D). The Drums card sets how loud all the drums,
+  and each drum, are in the whole song.
 
 Songs from before sections open as one section, A, in one block.
 

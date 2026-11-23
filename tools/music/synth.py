@@ -82,10 +82,11 @@ def pad(total):
 
 
 def hit(at, mix, gain=1.0):
-    """A soft low drum."""
+    """A soft low drum: struck harder (gain over 1), more of a thump at the start."""
     length = int(1.4 * RATE)
     tt = np.arange(length) / RATE
-    wave_ = np.sin(2 * np.pi * (46 + 30 * np.exp(-tt * 18)) * tt) * np.exp(-tt * 3.2) * 0.42 * gain
+    sweep = 30 * float(np.clip(gain, 0.05, 2.5)) ** 0.5
+    wave_ = np.sin(2 * np.pi * (46 + sweep * np.exp(-tt * 18)) * tt) * np.exp(-tt * 3.2) * 0.42 * gain
     add(mix, np.stack([wave_, wave_], axis=1).astype(np.float32), at)
 
 
@@ -100,15 +101,28 @@ def add(mix, sound, at, gain=1.0):
 # ---------------------------------------------------------------------------
 # synths
 
+def intensity(gain):
+    """How hard a note is played, from its loudness (1: as set): the
+    instruments play harder (velocity), and so do the synths: brighter and
+    fuller when loud, softer and rounder when quiet."""
+    return float(np.clip(gain, 0.05, 2.5))
+
+
 def pad_events(out, events, p):
     """Pad notes into `out`: events are (start s, length s, frequencies Hz[, end s[, gain]])."""
     n = len(out)
-    layers = ((1.0, 1.0), (p['detune'], p['shimmer']), (0.5, p['sub']), (2.0, p['air']))
-    partials = WAVES.get(p.get('wave', 'sine'), WAVES['sine'])
+    base_layers = ((1.0, 1.0), (p['detune'], p['shimmer']), (0.5, p['sub']), (2.0, p['air']))
+    base_partials = WAVES.get(p.get('wave', 'sine'), WAVES['sine'])
     for ev in events:
         start, length_s, freqs = ev[:3]
         end = ev[3] if len(ev) > 3 and ev[3] is not None else start + length_s
         note_gain = ev[4] if len(ev) > 4 else None
+        layers, partials = base_layers, base_partials
+        if note_gain is not None and abs(note_gain - 1) > 1e-9:
+            # played harder: the shimmer, the octave above and the overtones swell
+            x = intensity(note_gain)
+            layers = ((1.0, 1.0), (p['detune'], min(1.0, p['shimmer'] * x ** 0.5)), (0.5, p['sub']), (2.0, p['air'] * x))
+            partials = [(h, hg if h == 1 else hg * x ** 0.7) for h, hg in base_partials]
         a, b = int(start * RATE), min(n, int(end * RATE))
         if b <= a:
             continue
@@ -145,6 +159,10 @@ def pluck_events(out, events, p):
     for ev in events:
         start, f = ev[:2]
         note_gain = ev[2] if len(ev) > 2 else 1.0
+        # plucked harder: brighter, the high harmonics ring longer
+        x = intensity(note_gain)
+        bright = float(np.clip(p['brightness'] * x ** 0.35, 0.05, 0.97))
+        ring = x ** 0.25
         a = int(start * RATE)
         length = min(n - a, int((p['decay'] * 2.2) * RATE))
         if length <= 0:
@@ -154,8 +172,8 @@ def pluck_events(out, events, p):
         right = np.zeros(length)
         k = 1
         while k * f < 9000 and k <= 16:
-            g = (p['brightness'] ** (k - 1)) / k ** 0.5
-            d = np.exp(-tt * k ** 0.8 / max(0.05, p['decay']))
+            g = (bright ** (k - 1)) / k ** 0.5
+            d = np.exp(-tt * k ** 0.8 / (ring ** (k > 1) * max(0.05, p['decay'])))
             left += g * d * np.sin(2 * np.pi * f * k * tt)
             right += g * d * np.sin(2 * np.pi * f * k * p['width'] * tt + 0.4)
             k += 1
@@ -173,7 +191,7 @@ def pluck_events(out, events, p):
 #     "sections": [ {"id": "A", "name": "A", "chords": [..], "melody": [..], "drums": [{"beat": 0, "kind": "low"}, ..],
 #                    "parts": {"<track id>": "melody" | "chords" | "bass" | "arp" | "rest"}} ],
 #                    "beatsPerBar": 3, "legato": {"<track id>": true},
-#                    "volume": {"<track id>" | "drums": 0..1.5}, "bpm": 72} ],
+#                    "volume": {"<track id>" | "drums" | "drum:<kind>": 0..1.5}, "bpm": 72} ],
 #                    (parts: what a track plays in this section, if not what the band says;
 #                    beatsPerBar: its own time signature; legato: per track, over the band's;
 #                    volume: per track, times the band's and the block's; bpm: its own tempo)
@@ -183,8 +201,10 @@ def pluck_events(out, events, p):
 #     "arrangement": [ {"section": "A", "repeat": 1, "label": "harp only",
 #                       "mix": {"<track id>": {"on": true, "volume": 1}, "drums": {..}},
 #                       "fadeIn": 0, "fadeOut": 0, "slowTo": 1, "slowOver": 0, "bpm": 72} ],
-#     "tracks": [ {"id": "t1", "type": .., ..} ]
+#     "tracks": [ {"id": "t1", "type": .., ..} ],
+#     "drumVolume": 1, "drumVolumes": {"<kind>": 1}       all the drums, and each drum
 #   }
+# (a block's mix and a section's volume take "drum:<kind>" too: one drum)
 # (fades in bars; slowTo: the tempo at the block's end, as a share, reached
 # over its last slowOver bars, or the whole block when 0; bpm: the block's own
 # tempo, over its section's and the song's)
@@ -528,14 +548,21 @@ def render(song, loop=False, soundfont=SOUNDFONT, info=None):
         # the drums
         on, dgain = mixed(bl, 'drums')
         if on and dgain > 0:
-            dgain *= float(song.get('drumVolume', 1.0)) * float((sec.get('volume') or {}).get('drums', 1.0))
+            vols = sec.get('volume') or {}
+            dgain *= float(song.get('drumVolume', 1.0)) * float(vols.get('drums', 1.0))
             for h in sec.get('drums', []):
                 hb = float(h.get('beat', 0))
                 if hb >= beats or resting(chords, 'drums', hb):
                     continue
-                kind = DRUMS.get(h.get('kind', 'low'), DRUMS['low'])
+                # each drum: in the song (the band), in the section, in the block
+                kid = h.get('kind', 'low')
+                kon, kgain = mixed(bl, 'drum:' + kid)
+                kgain *= float((song.get('drumVolumes') or {}).get(kid, 1.0)) * float(vols.get('drum:' + kid, 1.0))
+                if not kon or kgain <= 0:
+                    continue
+                kind = DRUMS.get(kid, DRUMS['low'])
                 t = when(start + hb)
-                g = dgain * float(h.get('volume', 1)) * loud()
+                g = dgain * kgain * float(h.get('volume', 1)) * loud()
                 if kind[1] == 'synth':
                     hit(t, mix, g)
                 elif kind[1] == 'kit':
