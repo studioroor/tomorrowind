@@ -10,7 +10,9 @@ tools/music/studio.py          # then open http://127.0.0.1:8765
 ```
 
 - Songs are saved in `music/songs/<name>.json` (`trailer` is the trailers'
-  own soundtrack, as chords to start from).
+  own soundtrack, as chords to start from). Name renames the song when you
+  press Enter (Esc keeps the old name); Save then reads "Save as …" and
+  writes a new file, leaving the old one as it was.
 - **Export WAV** writes `music/out/<name>.wav`, or `<name>-loop.wav` with
   Loop on: the end flows back into the start, for ambient videos.
 - A trailer with your music: `tools/make_trailer.py <take> trailer/ --music music/out/<name>.wav`.

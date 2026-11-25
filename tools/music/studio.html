@@ -195,7 +195,7 @@ input[type=range] { accent-color: var(--gold); }
   <div class="top">
     <h1>Tomorrowind studio</h1>
     <label class="field"><span>Song</span><select id="songList" aria-label="Open a song"></select></label>
-    <label class="field"><span>Name</span><input type="text" id="name" size="14"></label>
+    <label class="field" title="Renames the song: Save then writes it under this name (Enter to rename, Esc to keep the old one)"><span>Name</span><input type="text" id="name" size="14" autocomplete="off" spellcheck="false" data-1p-ignore data-lpignore="true"></label>
     <button class="btn" id="save">Save</button>
     <button class="btn" id="newSong">New song</button>
     <button class="btn" id="openCmd" title="Commands, and the keyboard shortcuts (?)">⌘K</button>
@@ -290,6 +290,9 @@ const $ = (s) => document.querySelector(s);
 const JSON_HEADERS = { 'Content-Type': 'application/json' };
 let setup, song, blockSel = 0, secSel = 'A', chordSel = -1, noteLen = 1, dotted = false, view = 'arrange';
 let ui = { closed: {}, allDrums: false, extraDrums: {} };
+// the file this song was opened from or last saved as (null: never saved)
+let savedAs = null;
+function setSavedAs(name) { savedAs = name; try { localStorage.setItem('tmw-studio-file', name || ''); } catch (e) {} }
 const LENS = [[0.25, '¼'], [0.5, '½'], [1, '1'], [2, '2'], [4, '4']];
 function curLen() { return noteLen * (dotted ? 1.5 : 1); }
 // the grid: half beats, or quarter beats when the note length needs them (or asked for)
@@ -382,8 +385,9 @@ function keepUi() { try { localStorage.setItem('tmw-studio-ui', JSON.stringify({
 async function saveSong() {
   const r = await (await fetch('/api/save', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ song }) })).json();
   if (r.error) return status(r.error, true);
-  song.name = r.name; $('#name').value = r.name;
-  await loadSongList(r.name);
+  song.name = r.name; setSavedAs(r.name); keep();
+  await loadSongList();
+  drawHeader();
   status('Saved as music/songs/' + r.name + '.json');
 }
 async function normalize(s) { return (await fetch('/api/normalize', { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ song: s }) })).json(); }
@@ -396,8 +400,9 @@ async function loadSongList(pick) {
 async function openSong(name) {
   const r = await fetch('/api/song/' + encodeURIComponent(name));
   if (!r.ok) return status('There is no song called ' + name, true);
-  useSong(await r.json());
-  $('#songList').value = name;
+  const s = await r.json();
+  s.name = name; // the file's name, whatever is written inside it
+  setSavedAs(name); useSong(s); keep();
   status('Opened ' + name);
 }
 function useSong(s) {
@@ -436,7 +441,21 @@ function playLabel() {
 function bindHeader() {
   for (const b of document.querySelectorAll('.mode')) b.onclick = () => setView(b.dataset.mode);
   $('#songList').onchange = (e) => openSong(e.target.value);
-  $('#name').oninput = (e) => { song.name = e.target.value; keep(); };
+  // the name changes only when you mean it: Enter or leaving the box (not
+  // every key), Esc keeps the old one, and an empty box is no name
+  const nameBox = $('#name');
+  nameBox.onkeydown = (e) => {
+    if (e.key === 'Enter') nameBox.blur();
+    if (e.key === 'Escape') { nameBox.value = song.name || ''; nameBox.blur(); }
+  };
+  nameBox.onchange = () => {
+    const name = nameBox.value.trim();
+    if (!name || name === song.name) { nameBox.value = song.name || ''; return; }
+    song.name = name; keep(); drawHeader();
+    status(savedAs && savedAs !== safeName(name)
+      ? 'Renamed: Save writes music/songs/' + safeName(name) + '.json (' + savedAs + '.json stays as it is)'
+      : 'Renamed to ' + name);
+  };
   for (const [id, key] of [['#bpm', 'bpm'], ['#bpb', 'beatsPerBar']]) {
     $(id).onchange = (e) => { song[key] = Math.max(+e.target.min, Math.min(+e.target.max, +e.target.value || +e.target.min)); e.target.value = song[key]; keep(); drawAll(); };
   }
@@ -446,7 +465,7 @@ function bindHeader() {
     useSong({ name: 'new-song', bpm: 60, beatsPerBar: 4, feel: { ...setup.feel },
       sections: [{ id: 'A', name: 'A', chords: [{ root: 'D', octave: 3, quality: 'm', voicing: 'close', bars: 1 }], melody: [], drums: [] }],
       arrangement: [{ section: 'A', repeat: 1 }], tracks: [pad] });
-    keep(); status('A new song: give it a name and save it');
+    setSavedAs(null); keep(); drawHeader(); status('A new song: give it a name and save it');
   };
   $('#openCmd').onclick = () => openCommands();
   $('#play').onclick = () => play(view === 'compose' ? { kind: 'section', id: secSel } : { kind: 'song' });
@@ -471,7 +490,21 @@ function bindHeader() {
   // an added row belongs to its section
   $('#addDrum').onchange = (e) => { if (e.target.value) { ui.extraDrums[cur().id + ':' + e.target.value] = true; keepUi(); drawDrums(); } e.target.value = ''; };
 }
-function drawHeader() { $('#name').value = song.name || ''; $('#bpm').value = song.bpm; $('#bpb').value = bpb(); playLabel(); }
+function drawHeader() {
+  if (document.activeElement !== $('#name')) $('#name').value = song.name || '';
+  $('#bpm').value = song.bpm; $('#bpb').value = bpb(); playLabel();
+  // the song list shows the song you're in, and says when it isn't saved under this name
+  const list = $('#songList'), file = safeName(song.name);
+  list.querySelector('option.unsaved')?.remove();
+  if (![...list.options].some((o) => o.value === file)) {
+    const o = new Option((song.name || 'untitled') + ' (not saved yet)', ''); o.className = 'unsaved'; o.disabled = true;
+    list.add(o, 0);
+  }
+  list.value = [...list.options].some((o) => o.value === file) ? file : '';
+  $('#save').textContent = savedAs && savedAs !== file ? 'Save as ' + file : 'Save';
+}
+// the server's file name for a song name (as in studio.py)
+function safeName(n) { return (n || '').trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'untitled'; }
 
 // ---------------------------------------------------------------- arrange
 function blockSummary(bl) {
@@ -1778,8 +1811,12 @@ window.addEventListener('resize', () => { drawRoll(); drawDrums(); if (view === 
   let draft = null;
   try { draft = JSON.parse(localStorage.getItem('tmw-studio-draft') || 'null'); } catch (e) {}
   if (draft && (draft.sections || draft.chords)) {
+    let file = null;
+    try { file = localStorage.getItem('tmw-studio-file'); } catch (e) {}
+    // drafts from before this was kept: the song's own name, if there is such a file
+    savedAs = file !== null ? file || null : ([...$('#songList').options].some((o) => o.value === safeName(draft.name)) ? safeName(draft.name) : null);
     useSong(draft.sections ? draft : await normalize(draft));
-    status('Picked up where you left off'); $('#songList').value = draft.name;
+    status('Picked up where you left off' + (savedAs && savedAs !== safeName(song.name) ? ': ' + savedAs + ', renamed to ' + song.name + ' (not saved under that name yet)' : ''));
   } else await openSong('trailer');
   if (!setup.soundfont) status('Instruments need the SoundFont: see music/README.md', true);
   document.fonts && document.fonts.ready.then(() => drawAll());
