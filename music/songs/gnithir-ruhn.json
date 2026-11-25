@@ -1,0 +1,2249 @@
+{
+  "name": "gnithir-ruhn",
+  "bpm": 100,
+  "beatsPerBar": 2,
+  "tracks": [
+    {
+      "type": "pad",
+      "part": "chords",
+      "volume": 0.34,
+      "octave": 0,
+      "wave": "warm",
+      "mute": false,
+      "id": "t1"
+    },
+    {
+      "type": "instrument",
+      "part": "chords",
+      "program": 49,
+      "volume": 0.34,
+      "octave": 0,
+      "reverb": 80,
+      "mute": false,
+      "id": "t2"
+    },
+    {
+      "type": "instrument",
+      "part": "chords",
+      "program": 52,
+      "volume": 0.4,
+      "octave": 1,
+      "reverb": 90,
+      "mute": false,
+      "id": "t3"
+    },
+    {
+      "type": "instrument",
+      "part": "bass",
+      "program": 43,
+      "volume": 0.5,
+      "octave": 0,
+      "mute": false,
+      "id": "t4"
+    },
+    {
+      "type": "instrument",
+      "part": "melody",
+      "program": 46,
+      "volume": 1,
+      "octave": 0,
+      "step": 0.5,
+      "pattern": "updown",
+      "id": "t5"
+    },
+    {
+      "type": "instrument",
+      "part": "arp",
+      "program": 60,
+      "volume": 0.6,
+      "octave": 0,
+      "reverb": 90,
+      "mute": false,
+      "id": "t6"
+    },
+    {
+      "id": "t7",
+      "type": "instrument",
+      "part": "chords",
+      "volume": 1,
+      "octave": 0,
+      "program": 42,
+      "velocity": 80,
+      "pan": 64,
+      "reverb": 60
+    }
+  ],
+  "sections": [
+    {
+      "id": "A",
+      "name": "A",
+      "chords": [
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "close",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "close",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "close",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "close",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        }
+      ],
+      "melody": [
+        {
+          "beat": 0,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 1,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 4,
+          "len": 0.5,
+          "pitch": 77
+        },
+        {
+          "beat": 4.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 5,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 5.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 7.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 8,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 9,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 1.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 12,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 12.5,
+          "len": 0.5,
+          "pitch": 71
+        },
+        {
+          "beat": 13,
+          "len": 0.5,
+          "pitch": 69
+        },
+        {
+          "beat": 13.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 14,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 15.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 16,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 17,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 20,
+          "len": 0.5,
+          "pitch": 77
+        },
+        {
+          "beat": 20.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 21,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 21.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 24,
+          "len": 0.5,
+          "pitch": 77
+        },
+        {
+          "beat": 24.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 25,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 27,
+          "len": 1,
+          "pitch": 72
+        },
+        {
+          "beat": 28,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 29,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 31.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 31,
+          "len": 0.5,
+          "pitch": 65
+        },
+        {
+          "beat": 30.5,
+          "len": 0.5,
+          "pitch": 64
+        },
+        {
+          "beat": 9.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 17.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 2,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 10,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 18,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 6,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 22,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 28.5,
+          "len": 0.5,
+          "pitch": 76
+        }
+      ],
+      "drums": [
+        {
+          "beat": 0,
+          "kind": "low"
+        },
+        {
+          "beat": 4,
+          "kind": "low"
+        },
+        {
+          "beat": 8,
+          "kind": "low"
+        },
+        {
+          "beat": 12,
+          "kind": "low"
+        },
+        {
+          "beat": 16,
+          "kind": "low"
+        },
+        {
+          "beat": 20,
+          "kind": "low"
+        },
+        {
+          "beat": 24,
+          "kind": "low"
+        },
+        {
+          "beat": 26,
+          "kind": "low"
+        },
+        {
+          "beat": 28,
+          "kind": "low"
+        },
+        {
+          "beat": 30,
+          "kind": "low"
+        },
+        {
+          "beat": 3.5,
+          "kind": "low"
+        },
+        {
+          "beat": 11.5,
+          "kind": "low"
+        },
+        {
+          "beat": 19.5,
+          "kind": "low"
+        },
+        {
+          "beat": 25.5,
+          "kind": "low"
+        },
+        {
+          "beat": 29.5,
+          "kind": "low"
+        }
+      ],
+      "parts": {
+        "t6": "rest",
+        "t3": "rest",
+        "t7": "rest",
+        "t1": "rest",
+        "t2": "rest"
+      }
+    },
+    {
+      "id": "C",
+      "name": "A\u2032",
+      "chords": [
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "Bb",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "Bb",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        }
+      ],
+      "melody": [
+        {
+          "beat": 0,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 1,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 4,
+          "len": 0.5,
+          "pitch": 77
+        },
+        {
+          "beat": 4.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 5,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 5.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 7.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 8,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 9,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 1.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 12,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 12.5,
+          "len": 0.5,
+          "pitch": 71
+        },
+        {
+          "beat": 13,
+          "len": 0.5,
+          "pitch": 69
+        },
+        {
+          "beat": 13.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 14,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 15.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 16,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 17,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 20,
+          "len": 0.5,
+          "pitch": 77
+        },
+        {
+          "beat": 20.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 21,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 21.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 24,
+          "len": 0.5,
+          "pitch": 77
+        },
+        {
+          "beat": 24.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 25,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 27,
+          "len": 1,
+          "pitch": 72
+        },
+        {
+          "beat": 28,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 29,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 9.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 17.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 2,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 10,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 18,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 6,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 22,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 28.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 30,
+          "len": 1,
+          "pitch": 72
+        },
+        {
+          "beat": 31,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 31.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 32,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 33,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 33.5,
+          "len": 0.5,
+          "pitch": 65
+        }
+      ],
+      "drums": [
+        {
+          "beat": 0,
+          "kind": "low"
+        },
+        {
+          "beat": 4,
+          "kind": "low"
+        },
+        {
+          "beat": 8,
+          "kind": "low"
+        },
+        {
+          "beat": 12,
+          "kind": "low"
+        },
+        {
+          "beat": 16,
+          "kind": "low"
+        },
+        {
+          "beat": 20,
+          "kind": "low"
+        },
+        {
+          "beat": 24,
+          "kind": "low"
+        },
+        {
+          "beat": 26,
+          "kind": "low"
+        },
+        {
+          "beat": 28,
+          "kind": "low"
+        },
+        {
+          "beat": 3.5,
+          "kind": "low"
+        },
+        {
+          "beat": 11.5,
+          "kind": "low"
+        },
+        {
+          "beat": 19.5,
+          "kind": "low"
+        },
+        {
+          "beat": 25.5,
+          "kind": "low"
+        },
+        {
+          "beat": 27.5,
+          "kind": "low"
+        },
+        {
+          "beat": 30.5,
+          "kind": "low"
+        },
+        {
+          "beat": 31,
+          "kind": "low"
+        },
+        {
+          "beat": 33.5,
+          "kind": "low"
+        }
+      ],
+      "parts": {
+        "t6": "rest",
+        "t3": "rest",
+        "t7": "rest"
+      }
+    },
+    {
+      "id": "G",
+      "name": "A\u2032\u2032",
+      "chords": [
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "F",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "A",
+          "octave": 2,
+          "quality": "7",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "F",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "Bb",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "Bb",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        }
+      ],
+      "melody": [
+        {
+          "beat": 0,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 1,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 4,
+          "len": 0.5,
+          "pitch": 77
+        },
+        {
+          "beat": 4.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 5,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 5.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 7.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 8,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 9,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 1.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 12,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 12.5,
+          "len": 0.5,
+          "pitch": 71
+        },
+        {
+          "beat": 13,
+          "len": 0.5,
+          "pitch": 69
+        },
+        {
+          "beat": 13.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 14,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 15.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 16,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 17,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 20,
+          "len": 0.5,
+          "pitch": 77
+        },
+        {
+          "beat": 20.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 21,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 21.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 24,
+          "len": 0.5,
+          "pitch": 77
+        },
+        {
+          "beat": 24.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 25,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 27,
+          "len": 1,
+          "pitch": 72
+        },
+        {
+          "beat": 28,
+          "len": 0.5,
+          "pitch": 74
+        },
+        {
+          "beat": 29,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 9.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 17.5,
+          "len": 0.5,
+          "pitch": 72
+        },
+        {
+          "beat": 2,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 10,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 18,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 6,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 22,
+          "len": 2,
+          "pitch": 74
+        },
+        {
+          "beat": 28.5,
+          "len": 0.5,
+          "pitch": 76
+        },
+        {
+          "beat": 32,
+          "len": 1,
+          "pitch": 74
+        },
+        {
+          "beat": 33,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 33.5,
+          "len": 0.5,
+          "pitch": 65
+        },
+        {
+          "beat": 31.5,
+          "len": 0.5,
+          "pitch": 67
+        }
+      ],
+      "drums": [
+        {
+          "beat": 0,
+          "kind": "low"
+        },
+        {
+          "beat": 4,
+          "kind": "low"
+        },
+        {
+          "beat": 8,
+          "kind": "low"
+        },
+        {
+          "beat": 12,
+          "kind": "low"
+        },
+        {
+          "beat": 16,
+          "kind": "low"
+        },
+        {
+          "beat": 20,
+          "kind": "low"
+        },
+        {
+          "beat": 24,
+          "kind": "low"
+        },
+        {
+          "beat": 3.5,
+          "kind": "low"
+        },
+        {
+          "beat": 11.5,
+          "kind": "low"
+        },
+        {
+          "beat": 19.5,
+          "kind": "low"
+        },
+        {
+          "beat": 33.5,
+          "kind": "low"
+        },
+        {
+          "beat": 27.5,
+          "kind": "low"
+        },
+        {
+          "beat": 28,
+          "kind": "low"
+        },
+        {
+          "beat": 31.5,
+          "kind": "low"
+        },
+        {
+          "beat": 1,
+          "kind": "tamb"
+        },
+        {
+          "beat": 3,
+          "kind": "tamb"
+        },
+        {
+          "beat": 5,
+          "kind": "tamb"
+        },
+        {
+          "beat": 7,
+          "kind": "tamb"
+        },
+        {
+          "beat": 9,
+          "kind": "tamb"
+        },
+        {
+          "beat": 11,
+          "kind": "tamb"
+        },
+        {
+          "beat": 13,
+          "kind": "tamb"
+        },
+        {
+          "beat": 15,
+          "kind": "tamb"
+        },
+        {
+          "beat": 17,
+          "kind": "tamb"
+        },
+        {
+          "beat": 19,
+          "kind": "tamb"
+        },
+        {
+          "beat": 21,
+          "kind": "tamb"
+        },
+        {
+          "beat": 23,
+          "kind": "tamb"
+        },
+        {
+          "beat": 25,
+          "kind": "tamb"
+        },
+        {
+          "beat": 27,
+          "kind": "tamb"
+        },
+        {
+          "beat": 29,
+          "kind": "tamb"
+        },
+        {
+          "beat": 31,
+          "kind": "tamb"
+        }
+      ],
+      "parts": {
+        "t6": "rest",
+        "t3": "rest",
+        "t7": "rest"
+      }
+    },
+    {
+      "id": "B",
+      "name": "pre-A",
+      "chords": [
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 0.5
+        }
+      ],
+      "melody": [
+        {
+          "beat": 0.5,
+          "len": 0.5,
+          "pitch": 67
+        }
+      ],
+      "drums": [],
+      "parts": {
+        "t6": "rest",
+        "t1": "rest",
+        "t2": "rest",
+        "t3": "rest",
+        "t7": "rest",
+        "t4": "rest"
+      }
+    },
+    {
+      "id": "D",
+      "name": "B",
+      "chords": [
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1,
+          "bass": "C"
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "spread",
+          "bars": 1,
+          "bass": "Bb"
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "D",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1,
+          "bass": "C"
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "spread",
+          "bars": 1,
+          "bass": "Bb"
+        },
+        {
+          "root": "Eb",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "A",
+          "octave": 2,
+          "quality": "m7",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "F#",
+          "octave": 2,
+          "quality": "7",
+          "voicing": "spread",
+          "bars": 1,
+          "bass": "Bb"
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1,
+          "bass": "B"
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 1
+        },
+        {
+          "root": "F",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 2
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "spread",
+          "bars": 2
+        },
+        {
+          "root": "A",
+          "octave": 2,
+          "quality": "sus4",
+          "voicing": "spread",
+          "bars": 4
+        }
+      ],
+      "melody": [
+        {
+          "beat": 0,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 1.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 2,
+          "len": 1,
+          "pitch": 66
+        },
+        {
+          "beat": 3,
+          "len": 0.5,
+          "pitch": 64
+        },
+        {
+          "beat": 3.5,
+          "len": 0.5,
+          "pitch": 66
+        },
+        {
+          "beat": 7,
+          "len": 0.5,
+          "pitch": 66
+        },
+        {
+          "beat": 7.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 8,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 9.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 10,
+          "len": 1,
+          "pitch": 66
+        },
+        {
+          "beat": 11,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 11.5,
+          "len": 0.5,
+          "pitch": 66
+        },
+        {
+          "beat": 12,
+          "len": 1,
+          "pitch": 67
+        },
+        {
+          "beat": 5,
+          "len": 1,
+          "pitch": 62
+        },
+        {
+          "beat": 4,
+          "len": 1,
+          "pitch": 67
+        },
+        {
+          "beat": 15,
+          "len": 0.5,
+          "pitch": 66
+        },
+        {
+          "beat": 15.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 17.5,
+          "len": 0.5,
+          "pitch": 67
+        },
+        {
+          "beat": 19,
+          "len": 0.5,
+          "pitch": 64
+        },
+        {
+          "beat": 19.5,
+          "len": 0.5,
+          "pitch": 66
+        },
+        {
+          "beat": 23,
+          "len": 0.5,
+          "pitch": 62
+        },
+        {
+          "beat": 23.5,
+          "len": 0.5,
+          "pitch": 64
+        },
+        {
+          "beat": 25.5,
+          "len": 0.5,
+          "pitch": 64
+        },
+        {
+          "beat": 16,
+          "len": 1,
+          "pitch": 69
+        },
+        {
+          "beat": 18,
+          "len": 1,
+          "pitch": 66
+        },
+        {
+          "beat": 20,
+          "len": 1,
+          "pitch": 67
+        },
+        {
+          "beat": 21,
+          "len": 1,
+          "pitch": 62
+        },
+        {
+          "beat": 24,
+          "len": 1,
+          "pitch": 65
+        },
+        {
+          "beat": 26,
+          "len": 1,
+          "pitch": 65
+        },
+        {
+          "beat": 27,
+          "len": 1,
+          "pitch": 67
+        },
+        {
+          "beat": 28,
+          "len": 1,
+          "pitch": 64
+        },
+        {
+          "beat": 30,
+          "len": 1,
+          "pitch": 62
+        },
+        {
+          "beat": 31,
+          "len": 1,
+          "pitch": 60
+        },
+        {
+          "beat": 32,
+          "len": 4,
+          "pitch": 62
+        }
+      ],
+      "drums": [],
+      "parts": {
+        "t5": "arp",
+        "t6": "melody",
+        "t1": "rest",
+        "t3": "rest",
+        "t2": "rest"
+      }
+    },
+    {
+      "id": "E",
+      "name": "C",
+      "chords": [
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "A",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "B",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1,
+          "bass": "F#"
+        },
+        {
+          "root": "E",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1
+        }
+      ],
+      "melody": [
+        {
+          "beat": 0,
+          "len": 0.5,
+          "pitch": 62
+        },
+        {
+          "beat": 0.5,
+          "len": 0.5,
+          "pitch": 64
+        },
+        {
+          "beat": 1,
+          "len": 1,
+          "pitch": 62
+        },
+        {
+          "beat": 2,
+          "len": 1,
+          "pitch": 60
+        },
+        {
+          "beat": 3,
+          "len": 0.5,
+          "pitch": 59
+        },
+        {
+          "beat": 3.5,
+          "len": 0.5,
+          "pitch": 60
+        },
+        {
+          "beat": 4,
+          "len": 1,
+          "pitch": 59
+        },
+        {
+          "beat": 5,
+          "len": 1,
+          "pitch": 57
+        },
+        {
+          "beat": 6,
+          "len": 0.5,
+          "pitch": 55
+        },
+        {
+          "beat": 6.5,
+          "len": 0.5,
+          "pitch": 57
+        },
+        {
+          "beat": 7,
+          "len": 1,
+          "pitch": 55
+        },
+        {
+          "beat": 8,
+          "len": 1,
+          "pitch": 54
+        },
+        {
+          "beat": 9,
+          "len": 3,
+          "pitch": 52
+        },
+        {
+          "beat": 12,
+          "len": 0.5,
+          "pitch": 60
+        },
+        {
+          "beat": 12.5,
+          "len": 0.5,
+          "pitch": 62
+        },
+        {
+          "beat": 13,
+          "len": 1,
+          "pitch": 60
+        },
+        {
+          "beat": 14,
+          "len": 1,
+          "pitch": 59
+        },
+        {
+          "beat": 15,
+          "len": 0.5,
+          "pitch": 57
+        },
+        {
+          "beat": 15.5,
+          "len": 0.5,
+          "pitch": 59
+        },
+        {
+          "beat": 16,
+          "len": 1,
+          "pitch": 57
+        },
+        {
+          "beat": 17,
+          "len": 1,
+          "pitch": 55
+        },
+        {
+          "beat": 19,
+          "len": 1,
+          "pitch": 50
+        },
+        {
+          "beat": 20,
+          "len": 1,
+          "pitch": 54
+        },
+        {
+          "beat": 21,
+          "len": 3,
+          "pitch": 52
+        },
+        {
+          "beat": 18,
+          "len": 1,
+          "pitch": 54
+        }
+      ],
+      "drums": [
+        {
+          "beat": 0,
+          "kind": "bass"
+        }
+      ],
+      "parts": {
+        "t7": "arp",
+        "t1": "rest",
+        "t3": "rest",
+        "t6": "melody"
+      },
+      "beatsPerBar": 3
+    },
+    {
+      "id": "F",
+      "name": "C\u2032",
+      "chords": [
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "G",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "C",
+          "octave": 2,
+          "quality": "",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "A",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "B",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1,
+          "bass": "F#"
+        },
+        {
+          "root": "E",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "B",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1,
+          "bass": "F#"
+        },
+        {
+          "root": "E",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1
+        },
+        {
+          "root": "B",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1,
+          "bass": "F#"
+        },
+        {
+          "root": "E",
+          "octave": 2,
+          "quality": "m",
+          "voicing": "open",
+          "bars": 1
+        }
+      ],
+      "melody": [
+        {
+          "beat": 0,
+          "len": 0.5,
+          "pitch": 62
+        },
+        {
+          "beat": 0.5,
+          "len": 0.5,
+          "pitch": 64
+        },
+        {
+          "beat": 1,
+          "len": 1,
+          "pitch": 62
+        },
+        {
+          "beat": 2,
+          "len": 1,
+          "pitch": 60
+        },
+        {
+          "beat": 3,
+          "len": 0.5,
+          "pitch": 59
+        },
+        {
+          "beat": 3.5,
+          "len": 0.5,
+          "pitch": 60
+        },
+        {
+          "beat": 4,
+          "len": 1,
+          "pitch": 59
+        },
+        {
+          "beat": 5,
+          "len": 1,
+          "pitch": 57
+        },
+        {
+          "beat": 6,
+          "len": 0.5,
+          "pitch": 55
+        },
+        {
+          "beat": 6.5,
+          "len": 0.5,
+          "pitch": 57
+        },
+        {
+          "beat": 7,
+          "len": 1,
+          "pitch": 55
+        },
+        {
+          "beat": 8,
+          "len": 1,
+          "pitch": 54
+        },
+        {
+          "beat": 9,
+          "len": 3,
+          "pitch": 52
+        },
+        {
+          "beat": 12,
+          "len": 0.5,
+          "pitch": 60
+        },
+        {
+          "beat": 12.5,
+          "len": 0.5,
+          "pitch": 62
+        },
+        {
+          "beat": 13,
+          "len": 1,
+          "pitch": 60
+        },
+        {
+          "beat": 14,
+          "len": 1,
+          "pitch": 59
+        },
+        {
+          "beat": 15,
+          "len": 0.5,
+          "pitch": 57
+        },
+        {
+          "beat": 15.5,
+          "len": 0.5,
+          "pitch": 59
+        },
+        {
+          "beat": 16,
+          "len": 1,
+          "pitch": 57
+        },
+        {
+          "beat": 17,
+          "len": 1,
+          "pitch": 55
+        },
+        {
+          "beat": 19,
+          "len": 1,
+          "pitch": 50
+        },
+        {
+          "beat": 20,
+          "len": 1,
+          "pitch": 54
+        },
+        {
+          "beat": 21,
+          "len": 3,
+          "pitch": 52
+        },
+        {
+          "beat": 18,
+          "len": 1,
+          "pitch": 54
+        },
+        {
+          "beat": 24,
+          "len": 1,
+          "pitch": 54
+        },
+        {
+          "beat": 25,
+          "len": 1,
+          "pitch": 50
+        },
+        {
+          "beat": 26,
+          "len": 1,
+          "pitch": 54
+        },
+        {
+          "beat": 27,
+          "len": 3,
+          "pitch": 52
+        },
+        {
+          "beat": 30,
+          "len": 1,
+          "pitch": 54
+        },
+        {
+          "beat": 31,
+          "len": 1,
+          "pitch": 50
+        },
+        {
+          "beat": 32,
+          "len": 1,
+          "pitch": 54
+        },
+        {
+          "beat": 33,
+          "len": 2,
+          "pitch": 52
+        }
+      ],
+      "drums": [],
+      "parts": {
+        "t7": "arp",
+        "t1": "rest",
+        "t6": "melody"
+      },
+      "beatsPerBar": 3
+    }
+  ],
+  "arrangement": [
+    {
+      "section": "B",
+      "repeat": 1,
+      "mix": {
+        "t1": {
+          "on": false
+        },
+        "t2": {
+          "on": false
+        },
+        "t6": {
+          "on": false
+        },
+        "t3": {
+          "on": false
+        },
+        "drums": {
+          "on": false
+        },
+        "t4": {
+          "on": false
+        },
+        "t7": {
+          "on": false
+        }
+      },
+      "label": "harp only"
+    },
+    {
+      "section": "A",
+      "repeat": 1,
+      "mix": {
+        "t1": {
+          "on": false
+        },
+        "t2": {
+          "on": false
+        },
+        "t6": {
+          "on": false
+        },
+        "t3": {
+          "on": false
+        },
+        "drums": {
+          "on": false
+        },
+        "t4": {
+          "on": true,
+          "volume": 0.7
+        },
+        "t7": {
+          "on": false
+        }
+      },
+      "label": "harp only + drone bass"
+    },
+    {
+      "section": "C",
+      "repeat": 1,
+      "mix": {
+        "t7": {
+          "on": false
+        }
+      },
+      "label": "harp + backing"
+    },
+    {
+      "section": "E",
+      "repeat": 1,
+      "mix": {
+        "t7": {
+          "volume": 0.65,
+          "on": false
+        }
+      }
+    },
+    {
+      "section": "F",
+      "repeat": 1,
+      "mix": {
+        "t7": {
+          "volume": 0.75
+        },
+        "t3": {
+          "volume": 0.5
+        }
+      },
+      "slowTo": 0.6,
+      "fadeOut": 1,
+      "slowOver": 4
+    },
+    {
+      "section": "B",
+      "repeat": 1,
+      "mix": {
+        "t1": {
+          "on": false
+        },
+        "t2": {
+          "on": false
+        },
+        "t6": {
+          "on": false
+        },
+        "t3": {
+          "on": false
+        },
+        "drums": {
+          "on": false
+        },
+        "t4": {
+          "on": false
+        },
+        "t7": {
+          "on": false
+        }
+      },
+      "label": "harp only"
+    },
+    {
+      "section": "G",
+      "repeat": 2,
+      "mix": {}
+    }
+  ],
+  "feel": {
+    "rubato": 0.1,
+    "human": 0.1,
+    "swing": 0
+  }
+}
